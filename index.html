@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#103273">
+<title>Apontamento de Falta</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Falta">
+<style>
+:root{--kb:#103273;--kb2:#1f55b8;--bg:#f2f4f8;--card:#fff;--ink:#14213d;--mut:#667085;--line:#e2e6ee;--soft:#e9eef8;--warn:#9a3b00;--warnbg:#fff1e0;--warnln:#f5b56b;--r:18px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg)}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);font-size:16px;line-height:1.4}
+button,input,select{font-family:inherit;font-size:inherit;color:inherit}
+.top{position:sticky;top:0;z-index:5;background:var(--kb);color:#fff;padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;display:flex;align-items:center;gap:12px}
+.top .t{flex:1;min-width:0}
+.top h1{font-size:17px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top small{display:block;opacity:.75;font-size:12px}
+.top button{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:10px;padding:8px 12px;font-size:14px;cursor:pointer}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 110px}
+.card{background:var(--card);border-radius:var(--r);padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.card h2{font-size:15px;margin:0 0 10px;color:var(--mut);font-weight:600}
+.hero{background:linear-gradient(135deg,var(--kb),var(--kb2));color:#fff}
+.hero h2{color:rgba(255,255,255,.8)}
+.hero .big{font-size:26px;font-weight:700;margin:0 0 4px}
+.hero p{margin:0 0 16px;opacity:.85}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:14px;padding:15px;font-size:17px;font-weight:600;cursor:pointer;text-align:center}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.pri{background:var(--kb);color:#fff}
+.btn.light{background:#fff;color:var(--kb)}
+.btn.sec{background:var(--soft);color:var(--kb)}
+.btn.ghost{background:transparent;color:var(--mut)}
+.btn.warn{background:var(--warnbg);color:var(--warn)}
+.btn.danger{background:#fdecec;color:#b42318}
+.btn.sm{padding:11px;font-size:15px}
+.btn+.btn{margin-top:10px}
+.row{display:flex;gap:10px}.row>*{flex:1}.row .btn+.btn{margin-top:0}
+label.f{display:block;font-size:14px;color:var(--mut);margin:0 0 6px;font-weight:600}
+.in{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:14px;background:#fff;font-size:17px;outline:none;appearance:none;-webkit-appearance:none}
+select.in{background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23667085' stroke-width='2' fill='none'/%3E%3C/svg%3E") no-repeat right 14px center;padding-right:36px}
+.in:focus{border-color:var(--kb2)}
+.fld{margin-bottom:16px}
+.err{color:#b42318;font-size:14px;margin:4px 0 12px;min-height:20px}
+.mut{color:var(--mut)}.sm-t{font-size:13px}
+.tabs{position:fixed;bottom:0;left:0;right:0;z-index:5;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+.tabs button{flex:1;border:0;background:none;padding:9px 0 11px;font-size:12px;color:var(--mut);cursor:pointer}
+.tabs button.on{color:var(--kb);font-weight:700}
+.tabs svg{display:block;margin:0 auto 2px}
+/* login */
+.login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px 16px}
+.login .box{max-width:420px;width:100%;margin:0 auto}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:28px}
+.brand .lg{width:52px;height:52px;border-radius:14px;background:var(--kb);display:grid;place-items:center}
+.brand b{font-size:22px;display:block}
+/* fluxo */
+.flow{min-height:100vh;display:flex;flex-direction:column}
+.flow .wrap{flex:1;display:flex;flex-direction:column;width:100%;padding-bottom:24px}
+.step{font-size:13px;font-weight:700;color:var(--kb2);text-transform:uppercase;letter-spacing:.04em}
+.q{font-size:25px;font-weight:700;line-height:1.25;margin:8px 0 10px}
+.hint{background:var(--soft);color:var(--kb);border-radius:12px;padding:10px 12px;font-size:14px;margin:0 0 8px}
+.opts{margin-top:18px}
+.opt{display:flex;align-items:center;justify-content:center;width:100%;min-height:70px;border:2px solid var(--line);background:#fff;border-radius:16px;font-size:20px;font-weight:700;color:var(--ink);cursor:pointer;margin-bottom:12px;padding:12px}
+.opt:active{border-color:var(--kb2);background:var(--soft)}
+.trail{margin-top:auto;padding-top:20px}
+.trail ol{margin:6px 0 0;padding-left:20px;font-size:13px;color:var(--mut)}
+.trail li{margin-bottom:3px}.trail li b{color:var(--ink);font-weight:600}
+.res{border-radius:var(--r);padding:20px;margin:6px 0 14px;background:var(--kb);color:#fff}
+.res small{display:block;opacity:.75;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.res .c{font-size:22px;font-weight:700;line-height:1.3}
+.res.imp{background:var(--warnbg);color:var(--warn);border:2px dashed var(--warnln)}
+.res.imp p{margin:10px 0 0;font-size:15px;color:var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.chip{display:inline-block;background:var(--soft);color:var(--kb);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:600}
+.chip.imp{background:var(--warnbg);color:var(--warn)}
+/* listas */
+.item{display:block;width:100%;text-align:left;background:#fff;border:0;border-radius:14px;padding:12px 14px;margin-bottom:8px;box-shadow:0 1px 2px rgba(16,24,40,.06);cursor:pointer}
+.item .l1{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--mut)}
+.item .l2{font-weight:600;margin:3px 0 6px}
+.item.imp{box-shadow:inset 4px 0 0 var(--warnln),0 1px 2px rgba(16,24,40,.06)}
+.empty{text-align:center;color:var(--mut);padding:30px 10px}
+.kpis{display:flex;gap:8px;margin-bottom:12px}
+.kpi{flex:1;background:#fff;border-radius:14px;padding:12px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.kpi b{display:block;font-size:24px}.kpi span{font-size:12px;color:var(--mut)}
+.kpi.imp b{color:var(--warn)}
+.par{margin-bottom:12px}
+.par .n{font-size:14px;font-weight:600;margin-bottom:4px}
+.par .bar{height:10px;border-radius:6px;background:var(--soft);overflow:hidden}
+.par .bar i{display:block;height:100%;background:var(--kb2);border-radius:6px}
+.par .v{font-size:12px;color:var(--mut);margin-top:3px}
+.top3{margin:0;padding:0;list-style:none}
+.top3 li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.top3 li:first-child{border-top:0}
+.top3 b{white-space:nowrap}
+details.filt summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between}
+details.filt summary::-webkit-details-marker{display:none}
+details.filt .g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+details.filt .g .full{grid-column:1/-1}
+details.filt .in{padding:11px;font-size:15px}
+/* sheet */
+#sheet{position:fixed;inset:0;z-index:20;display:none}
+#sheet.on{display:block}
+#sheet .bg{position:absolute;inset:0;background:rgba(10,20,40,.45)}
+#sheet .pn{position:absolute;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:#fff;border-radius:22px 22px 0 0;padding:10px 18px calc(env(safe-area-inset-bottom) + 18px)}
+#sheet .grip{width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 14px}
+@media (min-width:700px){#sheet .pn{left:50%;top:50%;bottom:auto;width:520px;transform:translate(-50%,-50%);border-radius:22px;padding:22px}#sheet .grip{display:none}}
+dl.kv{margin:0 0 14px;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:15px}
+dl.kv dt{color:var(--mut)}dl.kv dd{margin:0;font-weight:600}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%);background:#14213d;color:#fff;padding:12px 18px;border-radius:12px;font-size:15px;z-index:30;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100% - 32px);text-align:center}
+#toast.on{opacity:1}
+.ver{text-align:center;font-size:12px;color:var(--mut);margin-top:18px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="sheet"></div>
+<div id="toast"></div>
+<input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
+<script>
+'use strict';
+const VERSAO = '1.0';
+
+// ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
+const LOJAS = [
+  ['ÁGUA BRANCA','CIDADE INDUSTRIAL'],['HOSPITAL BARREIRO','CIDADE INDUSTRIAL'],['JK','CIDADE INDUSTRIAL'],
+  ['PRAÇA DA FEBEM','CIDADE INDUSTRIAL'],['PRAÇA TRABALHADORES','CIDADE INDUSTRIAL'],['SANTA MARIA','CIDADE INDUSTRIAL'],
+  ['SHOPPING ITAU','CIDADE INDUSTRIAL'],['TIRADENTES','CIDADE INDUSTRIAL'],['TITO FULGENCIO','CIDADE INDUSTRIAL'],
+  ['VIA DO MINERIO','CIDADE INDUSTRIAL'],['VISTA ALEGRE','CIDADE INDUSTRIAL'],['WAL MART','CIDADE INDUSTRIAL'],
+  ['AMAZONAS','GUTIERREZ'],['CUIABA','GUTIERREZ'],['FRANCISCO SA','GUTIERREZ'],['GUSTAVO AYALA','GUTIERREZ'],
+  ['GUTIERREZ','GUTIERREZ'],['JARDIM AMERICA','GUTIERREZ'],['NOVA SUISSA','GUTIERREZ'],['PÇA LEONARDO GUTIERR','GUTIERREZ'],
+  ['PRADO','GUTIERREZ'],['SILVA LOBO','GUTIERREZ'],['XAPURI','GUTIERREZ'],
+  ['ALPHAVILLE','STOP CENTER - OURO PRETO'],['BAUXITA','STOP CENTER - OURO PRETO'],['CACHOEIRA DO CAMPO','STOP CENTER - OURO PRETO'],
+  ['CENTRO OURO PRETO','STOP CENTER - OURO PRETO'],['ITABIRITO','STOP CENTER - OURO PRETO'],['ITABIRITO II','STOP CENTER - OURO PRETO'],
+  ['NOVA LIMA','STOP CENTER - OURO PRETO'],['PONTO VERDE','STOP CENTER - OURO PRETO'],['SANTA CRUZ','STOP CENTER - OURO PRETO'],
+  ['SERENA MALL','STOP CENTER - OURO PRETO'],['STOP CENTER','STOP CENTER - OURO PRETO'],
+];
+const CLUSTER_DE = Object.fromEntries(LOJAS);
+const CLUSTERS = [...new Set(LOJAS.map(l => l[1]))];
+const PACOTES = ['ALIMENTOS','CONVENIENCIA','CUIDADO ADULTO','DERMOCOSMETICOS','HIGIENE PESSOAL','MEDIC CONS PAC',
+  'MEDIC ESPECIAL','MEDIC RX EMAGRECEDOR E DIABETES','MEDIC RX GENERICO','MEDIC RX PROMOVIDO','MEDIC RX SIM TRADE',
+  'MIP GENERICO','MIP MARCA','NUTRICAO SAUDAVEL','PERFUMARIA','PET CARE','UNIVERSO INFANTIL','VACINA HUMANA'];
+
+// ── Causas raiz: valores controlados (alimentam o Pareto — não editar texto) ─
+const C = {
+  CORPO:  'Falha no Corpo e Alma',
+  PROF:   'Produtos diferentes em profundidade',
+  PADRAO: 'Vendedor não encontrou o produto que estava no local correto segundo o padrão de clique e retire',
+  REPOS:  'Erro de reposição',
+  PONTAS: 'Vendedor não tinha conhecimento das pontas',
+  DESC:   'Descumprimento do padrão de clique e retire',
+  SUBEST: 'Organização de subestoque mal feita',
+  MARF:   'Falha na procura do marfinite, por não usar relatório de recebimento',
+  DIVTOT: 'Divergência total de receção',
+  SIST:   'Erro de stock no sistema não identificado',
+  FURTO:  'Furto',
+  FPARC:  'Furto ou divergência parcial de receção',
+};
+const CAUSAS = Object.values(C);
+const IMPOSSIVEL = 'Impossível — inconsistência de resposta';
+const VALIDAS = new Set([...CAUSAS, IMPOSSIVEL]);
+
+// ── Árvore de decisão ──────────────────────────────────────────────────
+const N = {};
+const go = id => ({ next: id });
+const fim = causa => ({ causa });
+const SN = (sim, nao) => [['Sim', sim], ['Não', nao]];
+
+function frente(p, pergunta) {
+  N[p + '_frente']  = { q: pergunta, opts: SN(go(p + '_visivel'), fim(C.CORPO)) };
+  N[p + '_visivel'] = { q: 'Estava visível, sem outro produto diferente na frente dele?', opts: SN(fim(C.PADRAO), fim(C.PROF)) };
+}
+function ponta(p, noLocal, ateLocal, hint) {
+  N[p + '_sabia'] = { q: `O vendedor sabia que o produto estava ${noLocal}?`, hint, opts: SN(go(p + '_foi'), fim(C.PONTAS)) };
+  N[p + '_foi']   = { q: `O vendedor foi até ${ateLocal}?`, opts: SN(go(p + '_frente'), fim(C.DESC)) };
+  frente(p, `${noLocal[0].toUpperCase() + noLocal.slice(1)}, o produto estava na frente correta?`);
+}
+
+N.inicio   = { q: 'O produto foi encontrado na loja?', opts: SN(go('pn'), go('vendas')) };
+// Ramo SIM
+N.pn       = { q: 'Estava na ponta natural (a do planograma)?', opts: SN(go('pn_frente'), go('outra_pn')) };
+frente('pn', 'Estava na frente correta, conforme o planograma?');
+N.outra_pn = { q: 'Estava em outra ponta natural (diferente da do planograma)?', opts: SN(fim(C.REPOS), go('extra')) };
+N.extra    = { q: 'Estava em uma ponta extra?', opts: SN(go('paga'), go('subest')) };
+N.paga     = { q: 'Essa ponta extra era paga?', opts: SN(go('paga_sabia'), go('conf')) };
+ponta('paga', 'na ponta paga', 'a ponta paga');
+N.conf     = { q: 'Estava no confinamento?', opts: SN(go('conf_sabia'), go('ger_sabia')) };
+ponta('conf', 'no confinamento', 'o confinamento');
+ponta('ger', 'na ponta de gerente', 'a ponta de gerente', 'Não era ponta paga nem confinamento, então é uma ponta de gerente.');
+N.subest   = { q: 'Estava no subestoque?', opts: SN(go('sub_foi'), go('marf')) };
+N.sub_foi  = { q: 'O vendedor foi até o subestoque?', opts: SN(go('sub_local'), fim(C.DESC)) };
+N.sub_local= { q: 'No subestoque, o produto estava no local do pacote correto?', opts: SN(fim(C.PADRAO), fim(C.SUBEST)) };
+N.marf     = { q: 'Estava no marfinite?', opts: SN(go('marf_foi'), fim(IMPOSSIVEL)) };
+N.marf_foi = { q: 'O vendedor procurou no marfinite?', opts: SN(go('marf_rel'), fim(C.DESC)) };
+N.marf_rel = { q: 'Ele foi ao local indicado no relatório de recebimento?', opts: SN(fim(C.PADRAO), fim(C.MARF)) };
+// Ramo NÃO
+N.vendas   = { q: 'Desde o último recebimento, quantas das unidades recebidas foram vendidas?',
+               opts: [['Nenhuma (0)', fim(C.DIVTOT)], ['Todas', fim(C.SIST)], ['Parte delas', go('inv')]] };
+N.inv      = { q: 'Foi feita conferência no Inventário Rotativo desde o recebimento?',
+               opts: [['Sim, e o estoque batia', fim(C.FURTO)], ['Não / sem dado', fim(C.FPARC)]] };
+
+// ── Armazenamento local ────────────────────────────────────────────────
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+let registros = store.get('af_registros', []);
+let sessao = store.get('af_sessao', null);
+let tab = 'inicio';
+let flow = null;
+let filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' };
+const salvar = () => store.set('af_registros', registros);
+
+// ── Utilitários ────────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+const pad = n => String(n).padStart(2, '0');
+const fmtData = iso => { const d = new Date(iso); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const slug = s => norm(s).toLowerCase().replace(/ /g, '-');
+const isAdmin = () => sessao?.tipo === 'admin';
+const meus = () => registros.filter(r => r.loja === sessao.loja);
+const visiveis = () => isAdmin() ? registros : meus();
+const porData = arr => [...arr].sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 2800);
+}
+const IC = {
+  home: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>',
+  list: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  chart:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  lupa: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
+};
+
+// ── Render principal ───────────────────────────────────────────────────
+function render() {
+  const app = $('#app');
+  if (!sessao) return app.innerHTML = vLogin();
+  if (flow) return app.innerHTML = vFlow();
+  const tabs = isAdmin()
+    ? [['inicio', 'Painel', IC.chart], ['registros', 'Registros', IC.list]]
+    : [['inicio', 'Início', IC.home], ['registros', 'Histórico', IC.list]];
+  const titulo = isAdmin() ? 'Painel Kaizen' : sessao.loja;
+  const sub = isAdmin() ? 'Apontamento de Falta · todas as lojas' : CLUSTER_DE[sessao.loja];
+  let corpo = '';
+  if (tab === 'inicio') corpo = isAdmin() ? vPainel() : vInicioLoja();
+  else corpo = vRegistros();
+  app.innerHTML = `
+    <header class="top"><div class="t"><h1>${esc(titulo)}</h1><small>${esc(sub)}</small></div>
+      <button onclick="sair()">Sair</button></header>
+    <main class="wrap">${corpo}<div class="ver">Apontamento de Falta · v${VERSAO}</div></main>
+    <nav class="tabs">${tabs.map(([k, l, i]) => `<button class="${tab === k ? 'on' : ''}" onclick="irTab('${k}')">${i}${l}</button>`).join('')}</nav>`;
+}
+function irTab(k) { tab = k; render(); scrollTo(0, 0); }
+
+// ── Login ──────────────────────────────────────────────────────────────
+function vLogin() {
+  return `<div class="login"><div class="box">
+    <div class="brand"><div class="lg">${IC.lupa}</div><div><b>Apontamento de Falta</b><span class="mut">Clique e Retire · mapeamento de causa raiz</span></div></div>
+    <form onsubmit="entrar(event)" autocomplete="off">
+      <div class="fld"><label class="f" for="u">Usuário</label>
+        <input class="in" id="u" list="lojas-dl" autocapitalize="characters" placeholder="Nome da loja"></div>
+      <datalist id="lojas-dl">${LOJAS.map(l => `<option value="${esc(l[0])}">`).join('')}</datalist>
+      <div class="fld"><label class="f" for="p">Senha</label>
+        <input class="in" id="p" type="password" placeholder="Senha"></div>
+      <div class="err" id="lerr"></div>
+      <button class="btn pri" type="submit">Entrar</button>
+    </form></div></div>`;
+}
+function entrar(e) {
+  e.preventDefault();
+  const u = norm($('#u').value), p = norm($('#p').value);
+  if (u === 'ADMIN' && p === 'ADMIN') sessao = { tipo: 'admin' };
+  else {
+    const loja = LOJAS.find(([l]) => norm(l) === u);
+    if (loja && p === u) sessao = { tipo: 'loja', loja: loja[0] };
+  }
+  if (!sessao) { $('#lerr').textContent = 'Usuário ou senha incorretos.'; return; }
+  store.set('af_sessao', sessao); tab = 'inicio'; render();
+}
+function sair() {
+  if (!confirm('Sair da conta? Os apontamentos continuam salvos neste aparelho.')) return;
+  sessao = null; store.del('af_sessao'); render();
+}
+
+// ── Início (loja) ──────────────────────────────────────────────────────
+function vInicioLoja() {
+  const recs = meus();
+  const ult = store.get('af_envio_' + sessao.loja, null);
+  const pend = recs.filter(r => !ult || r.criado_em > ult).length;
+  const mes = new Date().toISOString().slice(0, 7);
+  const doMes = recs.filter(r => r.criado_em.slice(0, 7) === mes);
+  const top = contar(doMes.filter(r => r.tipo === 'causa')).slice(0, 3);
+  return `
+  <section class="card hero"><h2>Nova falta apontada?</h2>
+    <p>Responda às perguntas, uma de cada vez, até chegar à causa raiz.</p>
+    <button class="btn light" onclick="novo()">+ Novo apontamento</button></section>
+  <section class="card"><h2>Enviar para a Kaizen</h2>
+    <p style="margin:0 0 12px">${recs.length === 0 ? 'Nenhum apontamento registrado ainda.'
+      : pend ? `<b>${pend}</b> apontamento${pend > 1 ? 's' : ''} novo${pend > 1 ? 's' : ''} desde o último envio.`
+      : 'Tudo enviado. ✓'}
+      ${ult ? `<br><span class="mut sm-t">Último envio: ${fmtData(ult)}</span>` : ''}</p>
+    <button class="btn sec" onclick="enviar()" ${recs.length ? '' : 'disabled'}>Enviar pelo WhatsApp</button>
+    <p class="mut sm-t" style="margin:10px 0 0">Gera um arquivo com todos os apontamentos da loja. Envie ao consultor Kaizen.</p></section>
+  <section class="card"><h2>Este mês</h2>
+    <div class="kpis" style="margin:0 0 ${top.length ? 10 : 0}px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><b>${doMes.length}</b><span>apontamentos</span></div></div>
+    ${top.length ? `<ul class="top3">${top.map(([c, n]) => `<li><span>${esc(c)}</span><b>${n}</b></li>`).join('')}</ul>` : ''}</section>`;
+}
+
+// ── Registros / histórico ──────────────────────────────────────────────
+function vItem(r) {
+  const imp = r.tipo !== 'causa';
+  return `<button class="item ${imp ? 'imp' : ''}" onclick="detalhe('${r.id}')">
+    <div class="l1"><span>${fmtData(r.criado_em)}</span><span>${esc(isAdmin() ? r.loja : '')}</span></div>
+    <div class="l2">${esc(r.pacote)}${r.produto ? ' · ' + esc(r.produto) : ''}</div>
+    <span class="chip ${imp ? 'imp' : ''}">${esc(imp ? '⚠ Inconsistência' : r.causa_raiz)}</span></button>`;
+}
+function vRegistros() {
+  const lista = porData(isAdmin() ? filtrar() : meus());
+  return `${isAdmin() ? vFiltros() : ''}
+    ${!isAdmin() ? `<button class="btn pri" style="margin-bottom:14px" onclick="novo()">+ Novo apontamento</button>` : ''}
+    <p class="mut sm-t" style="margin:4px 4px 10px">${lista.length} registro${lista.length === 1 ? '' : 's'}</p>
+    ${lista.length ? lista.map(vItem).join('') : `<div class="empty">Nenhum apontamento ${isAdmin() ? 'com estes filtros' : 'ainda'}.</div>`}`;
+}
+function detalhe(id) {
+  const r = registros.find(x => x.id === id); if (!r) return;
+  const imp = r.tipo !== 'causa';
+  abrirSheet(`
+    <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Alerta de qualidade de dados' : 'Causa raiz'}</small><div class="c">${esc(r.causa_raiz)}</div></div>
+    <dl class="kv"><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd><dt>Loja</dt><dd>${esc(r.loja)}</dd>
+      <dt>Cluster</dt><dd>${esc(r.cluster)}</dd><dt>Pacote</dt><dd>${esc(r.pacote)}</dd>
+      ${r.produto ? `<dt>Produto</dt><dd>${esc(r.produto)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd></dl>
+    <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Caminho percorrido</h2>
+    <div class="trail" style="padding-top:0">${vTrilha(r.caminho)}</div>
+    <div style="margin-top:18px"><button class="btn sec" onclick="fecharSheet()">Fechar</button>
+    <button class="btn ghost sm" onclick="excluir('${r.id}')">Excluir apontamento</button></div>`);
+}
+function excluir(id) {
+  if (!confirm('Excluir este apontamento deste aparelho?')) return;
+  registros = registros.filter(r => r.id !== id); salvar(); fecharSheet(); render(); toast('Apontamento excluído');
+}
+function abrirSheet(html) { const s = $('#sheet'); s.innerHTML = `<div class="bg" onclick="fecharSheet()"></div><div class="pn"><div class="grip"></div>${html}</div>`; s.classList.add('on'); }
+function fecharSheet() { $('#sheet').classList.remove('on'); }
+const vTrilha = cam => `<ol>${cam.map(p => `<li>${esc(p.pergunta)} <b>${esc(p.resposta)}</b></li>`).join('')}</ol>`;
+
+// ── Fluxo de mapeamento ────────────────────────────────────────────────
+function novo() {
+  flow = { etapa: 'dados', loja: isAdmin() ? '' : sessao.loja, pacote: '', produto: '', path: [], atual: 'inicio', fim: null };
+  history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0);
+}
+function avancar() { history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0); }
+function comecar() { if (!flow.loja || !flow.pacote) return; flow.etapa = 'arvore'; flow.atual = 'inicio'; avancar(); }
+function responder(i) {
+  const no = N[flow.atual], [label, alvo] = no.opts[i];
+  flow.path.push({ no: flow.atual, pergunta: no.q, resposta: label });
+  if (alvo.next) flow.atual = alvo.next; else flow.fim = alvo.causa;
+  avancar();
+}
+// Um passo atrás (chamado pelo botão "voltar" do navegador/Android ou pelo botão Voltar)
+function recuar() {
+  if (!flow) return;
+  if (flow.etapa === 'dados') { flow = null; }
+  else if (flow.path.length) { const u = flow.path.pop(); flow.atual = u.no; flow.fim = null; }
+  else flow.etapa = 'dados';
+  render(); scrollTo(0, 0);
+}
+function sairFluxo() {
+  const passos = flow.etapa === 'dados' ? 1 : 2 + flow.path.length;
+  flow = null; history.go(-passos); render(); scrollTo(0, 0);
+}
+function cancelar() {
+  if (flow.path.length && !confirm('Descartar este apontamento?')) return;
+  sairFluxo();
+}
+addEventListener('popstate', () => { if ($('#sheet').classList.contains('on')) fecharSheet(); if (flow) recuar(); });
+
+function vFlow() {
+  const head = `<header class="top"><button onclick="history.back()">‹ Voltar</button>
+    <div class="t" style="text-align:center"><h1>Novo apontamento</h1><small>${esc(flow.loja || 'Selecione a loja')}${flow.pacote ? ' · ' + esc(flow.pacote) : ''}</small></div>
+    <button onclick="cancelar()">✕</button></header>`;
+  let corpo;
+  if (flow.etapa === 'dados') {
+    const lojaFld = isAdmin()
+      ? `<select class="in" onchange="flow.loja=this.value;dadosOk()"><option value="">Selecione…</option>
+          ${CLUSTERS.map(c => `<optgroup label="${esc(c)}">${LOJAS.filter(l => l[1] === c).map(l => `<option ${flow.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</optgroup>`).join('')}</select>`
+      : `<div class="in" style="background:var(--bg)">${esc(flow.loja)} <span class="mut sm-t">· ${esc(CLUSTER_DE[flow.loja])}</span></div>`;
+    corpo = `<div class="step">Dados da falta</div><div class="q">Qual produto faltou?</div>
+      <div class="fld"><label class="f">Loja</label>${lojaFld}</div>
+      <div class="fld"><label class="f">Pacote</label><select class="in" onchange="flow.pacote=this.value;dadosOk()">
+        <option value="">Selecione…</option>${PACOTES.map(p => `<option ${flow.pacote === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></div>
+      <div class="fld"><label class="f">Produto <span style="font-weight:400">(opcional)</span></label>
+        <input class="in" placeholder="Código ou nome do produto" value="${esc(flow.produto)}" oninput="flow.produto=this.value.trim()"></div>
+      <div style="margin-top:auto;padding-top:12px"><button class="btn pri" id="bcomecar" onclick="comecar()" ${flow.loja && flow.pacote ? '' : 'disabled'}>Começar perguntas</button></div>`;
+  } else if (!flow.fim) {
+    const no = N[flow.atual];
+    corpo = `<div class="step">Pergunta ${flow.path.length + 1}</div>
+      <div class="q">${esc(no.q)}</div>${no.hint ? `<div class="hint">${esc(no.hint)}</div>` : ''}
+      <div class="opts">${no.opts.map(([l], i) => `<button class="opt" onclick="responder(${i})">${esc(l)}</button>`).join('')}</div>
+      ${flow.path.length ? `<div class="trail"><span class="mut sm-t">Suas respostas</span>${vTrilha(flow.path)}</div>` : ''}`;
+  } else {
+    const imp = flow.fim === IMPOSSIVEL;
+    corpo = `<div class="step">Resultado</div>
+      <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Respostas inconsistentes' : 'Causa raiz'}</small>
+        <div class="c">${esc(imp ? 'Impossível' : flow.fim)}</div>
+        ${imp ? '<p>O produto foi encontrado na loja, mas não estava em nenhum dos locais possíveis. Revise as respostas. Se estiverem corretas, salve como inconsistência (não entra no Pareto).</p>' : ''}</div>
+      <div class="meta"><span class="chip">${esc(flow.loja)}</span><span class="chip">${esc(flow.pacote)}</span>${flow.produto ? `<span class="chip">${esc(flow.produto)}</span>` : ''}</div>
+      <div class="trail" style="margin-top:0;padding-top:0"><span class="mut sm-t">Caminho percorrido</span>${vTrilha(flow.path)}</div>
+      <div style="margin-top:auto;padding-top:20px">
+        ${imp ? `<button class="btn pri" onclick="history.back()">Revisar respostas</button>
+                 <button class="btn warn" onclick="gravar()">Salvar como inconsistência</button>`
+              : `<button class="btn pri" onclick="gravar()">Confirmar e salvar</button>
+                 <button class="btn sec" onclick="history.back()">Voltar e corrigir</button>`}</div>`;
+  }
+  return `<div class="flow">${head}<main class="wrap">${corpo}</main></div>`;
+}
+function dadosOk() { const b = $('#bcomecar'); if (b) b.disabled = !(flow.loja && flow.pacote); $('.top small').textContent = (flow.loja || 'Selecione a loja') + (flow.pacote ? ' · ' + flow.pacote : ''); }
+function gravar() {
+  const r = {
+    id: uid(), criado_em: new Date().toISOString(), loja: flow.loja, cluster: CLUSTER_DE[flow.loja],
+    pacote: flow.pacote, produto: flow.produto, usuario: isAdmin() ? 'admin' : sessao.loja,
+    causa_raiz: flow.fim, tipo: flow.fim === IMPOSSIVEL ? 'inconsistencia' : 'causa',
+    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })), versao: VERSAO,
+  };
+  registros.push(r);
+  if (!salvar()) { registros.pop(); alert('Não foi possível salvar neste aparelho (armazenamento bloqueado ou cheio).'); return; }
+  tab = 'inicio'; sairFluxo(); toast('Apontamento salvo ✓');
+}
+
+// ── CSV (exportação / envio / importação) ──────────────────────────────
+const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pacote', 'produto', 'usuario', 'causa_raiz', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
+function toCSV(recs) {
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const linhas = porData(recs).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.pacote, r.produto, r.usuario, r.causa_raiz, r.tipo,
+    r.caminho.map(p => `${p.pergunta} → ${p.resposta}`).join(' | '), r.criado_em, JSON.stringify(r.caminho)].map(q).join(';'));
+  return '﻿' + [COLS.join(';'), ...linhas].join('\r\n');
+}
+function parseCSV(txt) {
+  txt = txt.replace(/^﻿/, '');
+  const sep = txt.split(/\r?\n/, 1)[0].includes(';') ? ';' : ',';
+  const rows = []; let row = [], f = '', aspas = false;
+  for (let i = 0; i < txt.length; i++) {
+    const ch = txt[i];
+    if (aspas) { if (ch === '"') { if (txt[i + 1] === '"') { f += '"'; i++; } else aspas = false; } else f += ch; }
+    else if (ch === '"') aspas = true;
+    else if (ch === sep) { row.push(f); f = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && txt[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += ch;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  const [h, ...dados] = rows.filter(r => r.some(c => c !== ''));
+  return (dados || []).map(r => Object.fromEntries(h.map((k, i) => [k.trim(), r[i] ?? ''])));
+}
+function nomeArq(parte) { return `apontamento-falta_${parte}_${hojeISO()}.csv`; }
+function baixar(csv, nome) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+async function enviar() {
+  const recs = meus(); if (!recs.length) return;
+  const nome = nomeArq(slug(sessao.loja)), csv = toCSV(recs);
+  const marcar = () => { store.set('af_envio_' + sessao.loja, new Date().toISOString()); render(); };
+  const file = new File([csv], nome, { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); marcar(); toast('Arquivo compartilhado ✓'); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  baixar(csv, nome); marcar();
+  toast('Arquivo salvo em Downloads. Envie pelo WhatsApp ao consultor Kaizen.');
+}
+$('#imp').addEventListener('change', async e => {
+  let novos = 0, repetidos = 0, invalidos = 0;
+  const ids = new Set(registros.map(r => r.id));
+  for (const f of e.target.files) {
+    let linhas; try { linhas = parseCSV(await f.text()); } catch { invalidos++; continue; }
+    for (const l of linhas) {
+      let cam; try { cam = JSON.parse(l.caminho_json || '[]'); } catch { cam = []; }
+      if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso))) { invalidos++; continue; }
+      if (ids.has(l.id)) { repetidos++; continue; }
+      registros.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: l.cluster || CLUSTER_DE[l.loja] || '', pacote: l.pacote,
+        produto: l.produto, usuario: l.usuario, causa_raiz: l.causa_raiz, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam, versao: VERSAO });
+      ids.add(l.id); novos++;
+    }
+  }
+  e.target.value = '';
+  if (novos && !salvar()) { alert('Não foi possível salvar os dados importados neste aparelho.'); registros = store.get('af_registros', []); return; }
+  render();
+  alert(`Importação concluída\n\n${novos} novo(s)\n${repetidos} já existia(m)${invalidos ? `\n${invalidos} linha(s) inválida(s) ignorada(s)` : ''}`);
+});
+
+// ── Painel admin ───────────────────────────────────────────────────────
+function filtrar() {
+  const { cluster, loja, pacote, causa, de, ate } = filtros;
+  const t0 = de ? new Date(de + 'T00:00:00').getTime() : -Infinity, t1 = ate ? new Date(ate + 'T23:59:59.999').getTime() : Infinity;
+  return registros.filter(r => (!cluster || r.cluster === cluster) && (!loja || r.loja === loja) && (!pacote || r.pacote === pacote)
+    && (!causa || r.causa_raiz === causa) && (t => t >= t0 && t <= t1)(new Date(r.criado_em).getTime()));
+}
+function contar(recs) {
+  const m = new Map(); recs.forEach(r => m.set(r.causa_raiz, (m.get(r.causa_raiz) || 0) + 1));
+  return [...m].sort((a, b) => b[1] - a[1]);
+}
+function setF(k, v) { filtros[k] = v; if (k === 'cluster' && filtros.loja && CLUSTER_DE[filtros.loja] !== v && v) filtros.loja = ''; filtrosAbertos = true; render(); }
+let filtrosAbertos = false;
+function limparF() { filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' }; render(); }
+function vFiltros() {
+  const n = Object.values(filtros).filter(Boolean).length;
+  const sel = (k, opts, ph) => `<select class="in" onchange="setF('${k}',this.value)"><option value="">${ph}</option>${opts.map(o => `<option ${filtros[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  const lojas = LOJAS.filter(l => !filtros.cluster || l[1] === filtros.cluster).map(l => l[0]);
+  return `<details class="card filt" ${filtrosAbertos ? 'open' : ''} ontoggle="filtrosAbertos=this.open">
+    <summary><span>Filtros${n ? ` <span class="chip">${n} ativo${n > 1 ? 's' : ''}</span>` : ''}</span><span class="mut">▾</span></summary>
+    <div class="g">
+      <div class="full">${sel('cluster', CLUSTERS, 'Todos os clusters')}</div>
+      <div class="full">${sel('loja', lojas, 'Todas as lojas')}</div>
+      <div class="full">${sel('pacote', PACOTES, 'Todos os pacotes')}</div>
+      <div class="full">${sel('causa', [...CAUSAS, IMPOSSIVEL], 'Todas as causas')}</div>
+      <div><label class="f sm-t">De</label><input class="in" type="date" value="${filtros.de}" onchange="setF('de',this.value)"></div>
+      <div><label class="f sm-t">Até</label><input class="in" type="date" value="${filtros.ate}" onchange="setF('ate',this.value)"></div>
+      ${n ? `<div class="full"><button class="btn ghost sm" onclick="limparF()">Limpar filtros</button></div>` : ''}
+    </div></details>`;
+}
+function vPainel() {
+  const f = filtrar(), causas = f.filter(r => r.tipo === 'causa'), inc = f.length - causas.length;
+  const par = contar(causas), max = par[0]?.[1] || 1; let acum = 0;
+  const lojasCom = new Set(f.map(r => r.loja)).size;
+  return `
+  <section class="card hero"><h2>Consolidado</h2><div class="big">${registros.length} apontamentos</div>
+    <p>de ${new Set(registros.map(r => r.loja)).size} de ${LOJAS.length} lojas neste aparelho</p>
+    <div class="row"><button class="btn light sm" onclick="$('#imp').click()">Importar arquivos</button>
+    <button class="btn light sm" onclick="novo()">+ Novo</button></div></section>
+  ${vFiltros()}
+  <div class="kpis"><div class="kpi"><b>${f.length}</b><span>registros</span></div>
+    <div class="kpi"><b>${lojasCom}</b><span>lojas</span></div>
+    <div class="kpi imp"><b>${inc}</b><span>inconsistências</span></div></div>
+  <section class="card"><h2>Pareto de causas raiz</h2>
+    ${par.length ? par.map(([c, n]) => { acum += n; return `<div class="par"><div class="n">${esc(c)}</div>
+      <div class="bar"><i style="width:${(n / max * 100).toFixed(1)}%"></i></div>
+      <div class="v">${n} · ${(n / causas.length * 100).toFixed(0)}% · acumulado ${(acum / causas.length * 100).toFixed(0)}%</div></div>`; }).join('')
+      : '<div class="empty" style="padding:16px">Sem dados para mostrar.</div>'}
+    ${inc ? `<p class="sm-t" style="color:var(--warn);margin:4px 0 0">⚠ ${inc} inconsistência${inc > 1 ? 's' : ''} fora do Pareto.</p>` : ''}</section>
+  <section class="card"><h2>Exportar para Excel</h2>
+    <button class="btn pri" onclick="exportar(true)" ${f.length ? '' : 'disabled'}>Exportar filtrado (${f.length})</button>
+    <button class="btn sec" onclick="exportar(false)" ${registros.length ? '' : 'disabled'}>Exportar tudo (${registros.length})</button></section>`;
+}
+function exportar(soFiltrado) {
+  const recs = soFiltrado ? filtrar() : registros;
+  baixar(toCSV(recs), nomeArq(soFiltrado ? 'filtrado' : 'todos'));
+}
+
+// ── PWA ────────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+render();
+</script>
+</body>
+</html>
