@@ -156,7 +156,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '3.2';
+const VERSAO = '3.3';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -188,7 +188,7 @@ const C = {
   DESC:   'Descumprimento do padrão de clique e retire',
   SUBEST: 'Falha na Organização de Subestoque',
   MARF:   'Falha na procura do marfinite, por não usar relatório de recebimento',
-  OUTRO:  'Produto foi encontrado num outro local que não pertence ao padrão do clique e retire',
+  OUTRO:  'Produto foi encontrado em outro local fora do padrão clique e retire',
   DIVTOT: 'Divergência total de recepção',
   SIST:   'Erro de estoque no sistema não identificado',
   FURTO:  'Furto',
@@ -204,6 +204,7 @@ const CAUSA_ANTIGA = {
   'Divergência total de receção': C.DIVTOT,
   'Erro de stock no sistema não identificado': C.SIST,
   'Furto ou divergência parcial de receção': C.FPARC,
+  'Produto foi encontrado num outro local que não pertence ao padrão do clique e retire': C.OUTRO,
 };
 const causaAtual = c => CAUSA_ANTIGA[c] || c;
 
