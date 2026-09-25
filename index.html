@@ -139,6 +139,14 @@ details.grp[open] summary{margin-bottom:8px}
 .stepper{display:flex;gap:10px}.stepper .btn{flex:0 0 64px;font-size:26px;padding:10px}.stepper .in{flex:1;text-align:center;font-size:26px;font-weight:700}
 .pu{text-align:center;font-weight:600;color:var(--kb2);min-height:22px;margin:4px 0 10px}
 .g2{display:grid;gap:10px}
+.como{background:var(--soft);border-radius:12px;padding:12px 14px;margin-top:4px}
+.como b{color:var(--kb);font-size:14px}.como p{margin:4px 0 10px;white-space:pre-line;font-size:15px}
+.rk{display:flex;justify-content:space-between;gap:10px}.rk b{white-space:nowrap}
+.kg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.kg .kpi b{font-size:22px}
+textarea.in{resize:vertical;font-family:inherit;line-height:1.4}
+label.chk{display:flex;align-items:center;gap:10px;margin:0 0 14px;font-weight:600}
+label.chk input{width:20px;height:20px}
 </style>
 </head>
 <body>
@@ -148,7 +156,7 @@ details.grp[open] summary{margin-bottom:8px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '3.1';
+const VERSAO = '3.2';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -180,6 +188,7 @@ const C = {
   DESC:   'Descumprimento do padrão de clique e retire',
   SUBEST: 'Falha na Organização de Subestoque',
   MARF:   'Falha na procura do marfinite, por não usar relatório de recebimento',
+  OUTRO:  'Produto foi encontrado num outro local que não pertence ao padrão do clique e retire',
   DIVTOT: 'Divergência total de recepção',
   SIST:   'Erro de estoque no sistema não identificado',
   FURTO:  'Furto',
@@ -208,10 +217,10 @@ function frente(p, pergunta) {
   N[p + '_frente']  = { q: pergunta, opts: SN(go(p + '_visivel'), fim(C.CORPO)) };
   N[p + '_visivel'] = { q: 'Estava visível, sem outro produto diferente na frente dele?', opts: SN(fim(C.PADRAO), fim(C.PROF)) };
 }
-function ponta(p, noLocal, ateLocal, hint) {
+function ponta(p, noLocal, ateLocal, hint, frenteLocal = noLocal[0].toUpperCase() + noLocal.slice(1)) {
   N[p + '_sabia'] = { q: `O vendedor sabia que o produto estava ${noLocal}?`, hint, opts: SN(go(p + '_foi'), fim(C.PONTAS)) };
   N[p + '_foi']   = { q: `O vendedor foi até ${ateLocal}?`, opts: SN(go(p + '_frente'), fim(C.DESC)) };
-  frente(p, `${noLocal[0].toUpperCase() + noLocal.slice(1)}, o produto estava na frente correta?`);
+  frente(p, `${frenteLocal}, o produto estava na frente correta?`);
 }
 
 N.inicio   = { q: 'O produto foi encontrado na loja?', opts: SN(go('pn'), go('vendas')) };
@@ -224,13 +233,14 @@ N.paga     = { q: 'A ponta extra era paga?', opts: SN(go('paga_sabia'), go('sald
 ponta('paga', 'na ponta paga', 'a ponta paga');
 N.saldao   = { q: 'A ponta era de Saldão?', opts: SN(go('saldao_sabia'), go('conf')) };
 ponta('saldao', 'na ponta de Saldão', 'a ponta de Saldão');
-N.conf     = { q: 'Estava no confinamento?', opts: SN(go('conf_sabia'), go('ger_sabia')) };
+N.conf     = { q: 'Estava no confinamento?', opts: SN(go('conf_sabia'), go('outras_sabia')) };
 ponta('conf', 'no confinamento', 'o confinamento');
-ponta('ger', 'na ponta extra de gerente', 'a ponta extra de gerente', 'Não era ponta paga, de Saldão nem confinamento, então é uma ponta extra de gerente.');
+ponta('outras', 'nessa ponta', 'essa ponta', 'Não era ponta paga, de Saldão nem confinamento: é uma das Outras Pontas (Ponta de Gerente, Ilhas, etc.).', 'Nessa ponta');
 N.subest   = { q: 'Estava no subestoque?', opts: SN(go('sub_foi'), go('marf')) };
 N.sub_foi  = { q: 'O vendedor foi até o subestoque?', opts: SN(go('sub_local'), fim(C.DESC)) };
 N.sub_local= { q: 'No subestoque, o produto estava no local do pacote correto?', opts: SN(fim(C.PADRAO), fim(C.SUBEST)) };
-N.marf     = { q: 'Estava no marfinite?', opts: SN(go('marf_foi'), fim(IMPOSSIVEL)) };
+N.marf     = { q: 'Estava no marfinite?', opts: SN(go('marf_foi'), go('outro_local')) };
+N.outro_local = { q: 'Em que local estava o produto?', texto: true, placeholder: 'Ex.: balcão, caixa, depósito, carrinho…', causa: C.OUTRO };
 N.marf_foi = { q: 'O vendedor procurou no marfinite?', opts: SN(go('marf_rel'), fim(C.DESC)) };
 N.marf_rel = { q: 'Ele foi ao local indicado no relatório de recebimento?', opts: SN(fim(C.PADRAO), fim(C.MARF)) };
 // Ramo NÃO
@@ -258,7 +268,6 @@ const ERROS = {
 const msgErro = e => ERROS[e.message] || (/fetch|network|Failed/i.test(e.message) ? 'Sem conexão com o servidor. Verifique a internet.' : e.message);
 
 // ── Ferramentas da app ─────────────────────────────────────────────────
-const PROCESSOS = ['Processo A', 'Processo B', 'Processo C'];   // teste — depois uma lista por processo real
 const FERRAMENTAS = {
   apontamento_falta: { nome: 'Apontamento de Falta', desc: 'Mapear a causa raiz de uma falta no clique e retire.', icone: 'lupa', rpc: 'af' },
   recolha_tempos:    { nome: 'Tomada de Tempos', desc: 'Cronometrar um processo e registrar as unidades.', icone: 'relogio', rpc: 'tt' },
@@ -283,7 +292,7 @@ let filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' };
 let ttFiltros = { processo: '', loja: '' };
 const salvarFila = () => store.set('rec_fila', fila);
 const cacheKey = k => `rec_cache_${k}_${sessao.username}`;
-const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); };
+const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); processos = store.get(`rec_tt_proc_${sessao.username}`, []); };
 const minhaFila = k => fila.filter(r => r._dono === sessao.username && (!k || r._tool === k));
 function registros(k) {
   const c = cache[k] || [], ids = new Set(c.map(r => r.id));
@@ -321,6 +330,7 @@ const IC = {
   plus: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   lupa: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
   relogio: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>',
+  gear: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
   users: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .8 3.2 2.6 3.6 5.2"/></svg>',
   chave: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3M16.5 6.5l2.5 2.5M14 9l2 2"/></svg>',
 };
@@ -351,6 +361,7 @@ async function sincronizar() {
         fila = fila.filter(r => !(r._dono === sessao.username && r._tool === k && ok.has(r.id))); salvarFila();
         if (res.erro.length) console.warn('Registros recusados pelo servidor:', res.erro);
       }
+      if (k === 'recolha_tempos') await carregarProcessos();
       cache[k] = await rpc(`${p}_listar`, { p_token: sessao.token }); store.set(cacheKey(k), cache[k]);
     }
     sync.estado = minhaFila().length ? 'erro' : 'ok';
@@ -387,8 +398,8 @@ function render() {
     tabs = isLoja() ? [['inicio', 'Início', IC.home], ['registros', 'Histórico', IC.list]] : [['inicio', 'Painel', IC.chart], ['registros', 'Registros', IC.list]];
     corpo = tab === 'inicio' ? (isLoja() ? vInicioLoja() : vPainel()) : vRegistros();
   } else {
-    tabs = [['inicio', 'Registrar', IC.plus], ['registros', 'Registros', IC.list]];
-    corpo = tab === 'inicio' ? vTempos() : vTemposLista();
+    tabs = [['inicio', 'Registrar', IC.plus], ['registros', 'Painel', IC.chart], ...(isAdmin() ? [['processos', 'Processos', IC.gear]] : [])];
+    corpo = tab === 'inicio' ? vTempos() : tab === 'processos' && isAdmin() ? vProcessos() : vTemposPainel();
   }
   app.innerHTML = shell(voltar ? f.nome : sessao.nome, voltar ? sessao.nome : (CLUSTER_DE[sessao.loja] || f.nome), corpo, tabs, voltar);
   if (tela === 'recolha_tempos' && tab === 'inicio') ttTick();
@@ -601,7 +612,7 @@ function detalhe(id) {
     <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Alerta de qualidade de dados' : 'Causa raiz'}</small><div class="c">${esc(r.causa_raiz)}</div></div>
     <dl class="kv"><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd><dt>Loja</dt><dd>${esc(r.loja)}</dd>
       <dt>Cluster</dt><dd>${esc(r.cluster)}</dd><dt>Pacote</dt><dd>${esc(r.pacote)}</dd>
-      ${r.produto ? `<dt>Produto</dt><dd>${esc(r.produto)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
+      ${r.produto ? `<dt>Produto</dt><dd>${esc(r.produto)}</dd>` : ''}${r.local_encontrado ? `<dt>Local encontrado</dt><dd>${esc(r.local_encontrado)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
       <dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
     <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Caminho percorrido</h2>
     <div class="trail" style="padding-top:0">${vTrilha(r.caminho || [])}</div>
@@ -640,11 +651,16 @@ function responder(i) {
   if (alvo.next) flow.atual = alvo.next; else flow.fim = alvo.causa;
   avancar();
 }
+function responderTexto() {
+  const no = N[flow.atual], v = ($('#tresp').value || '').trim(); if (!v) return;
+  flow.path.push({ no: flow.atual, pergunta: no.q, resposta: v });
+  flow.local = v; flow.fim = no.causa; avancar();
+}
 // Um passo atrás (botão "voltar" do navegador/Android ou botão Voltar)
 function recuar() {
   if (!flow) return;
   if (flow.etapa === 'dados') { flow = null; }
-  else if (flow.path.length) { const u = flow.path.pop(); flow.atual = u.no; flow.fim = null; }
+  else if (flow.path.length) { const u = flow.path.pop(); flow.atual = u.no; flow.fim = null; if (N[u.no]?.texto) { flow.rascunho = u.resposta; flow.local = null; } }
   else flow.etapa = 'dados';
   render(); scrollTo(0, 0);
 }
@@ -678,7 +694,10 @@ function vFlow() {
     const no = N[flow.atual];
     corpo = `<div class="step">Pergunta ${flow.path.length + 1}</div>
       <div class="q">${esc(no.q)}</div>${no.hint ? `<div class="hint">${esc(no.hint)}</div>` : ''}
-      <div class="opts">${no.opts.map(([l], i) => `<button class="opt" onclick="responder(${i})">${esc(l)}</button>`).join('')}</div>
+      ${no.texto
+        ? `<div class="opts"><textarea class="in" id="tresp" rows="3" placeholder="${esc(no.placeholder || '')}" oninput="flow.rascunho=this.value;$('#bresp').disabled=!this.value.trim()">${esc(flow.rascunho || '')}</textarea>
+            <button class="btn pri" id="bresp" style="margin-top:12px" onclick="responderTexto()" ${(flow.rascunho || '').trim() ? '' : 'disabled'}>Continuar</button></div>`
+        : `<div class="opts">${no.opts.map(([l], i) => `<button class="opt" onclick="responder(${i})">${esc(l)}</button>`).join('')}</div>`}
       ${flow.path.length ? `<div class="trail"><span class="mut sm-t">Suas respostas</span>${vTrilha(flow.path)}</div>` : ''}`;
   } else {
     const imp = flow.fim === IMPOSSIVEL;
@@ -686,7 +705,7 @@ function vFlow() {
       <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Respostas inconsistentes' : 'Causa raiz'}</small>
         <div class="c">${esc(imp ? 'Impossível' : flow.fim)}</div>
         ${imp ? '<p>O produto foi encontrado na loja, mas não estava em nenhum dos locais possíveis. Revise as respostas. Se estiverem corretas, salve como inconsistência (não entra no Pareto).</p>' : ''}</div>
-      <div class="meta"><span class="chip">${esc(flow.loja)}</span><span class="chip">${esc(flow.pacote)}</span>${flow.produto ? `<span class="chip">${esc(flow.produto)}</span>` : ''}</div>
+      <div class="meta"><span class="chip">${esc(flow.loja)}</span><span class="chip">${esc(flow.pacote)}</span>${flow.produto ? `<span class="chip">${esc(flow.produto)}</span>` : ''}${flow.local ? `<span class="chip">Local: ${esc(flow.local)}</span>` : ''}</div>
       <div class="trail" style="margin-top:0;padding-top:0"><span class="mut sm-t">Caminho percorrido</span>${vTrilha(flow.path)}</div>
       <div style="margin-top:auto;padding-top:20px">
         ${imp ? `<button class="btn pri" onclick="history.back()">Revisar respostas</button>
@@ -707,13 +726,21 @@ function gravar() {
     id: uid(), criado_em: new Date().toISOString(), loja: flow.loja, cluster: CLUSTER_DE[flow.loja],
     pacote: flow.pacote, produto: flow.produto, usuario: sessao.nome,
     causa_raiz: flow.fim, tipo: flow.fim === IMPOSSIVEL ? 'inconsistencia' : 'causa',
-    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })),
+    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })), local_encontrado: flow.local || null,
   };
   if (!guardarNaFila('apontamento_falta', r)) return;
   tab = 'inicio'; sairFluxo(); toast('Apontamento salvo ✓'); sincronizar();
 }
 
 // ── Tomada de Tempos ───────────────────────────────────────────────────
+let processos = [];   // do servidor: { id, nome, unidade, descricao, ativo } — criados pelo admin
+const procDe = id => processos.find(p => p.id === id);
+const procAtivos = () => processos.filter(p => p.ativo);
+const chaveProc = r => r.processo_id || 'nome:' + r.processo;
+const minusc = s => s ? s[0].toLowerCase() + s.slice(1) : s;
+const rotuloUn = unidade => unidade ? `Nº de ${minusc(unidade)}` : 'Unidades';
+const procKey = () => `rec_tt_proc_${sessao.username}`;
+async function carregarProcessos() { processos = await rpc('tt_processos_listar', { p_token: sessao.token }); store.set(procKey(), processos); }
 const ttUltimo = store.get('rec_tt_ultimo', {});
 let tt = { processo: ttUltimo.processo || '', loja: ttUltimo.loja || '', acum: 0, t0: null, unidades: '', obs: '' };
 const ttSegundos = () => tt.acum + (tt.t0 ? (Date.now() - tt.t0) / 1000 : 0);
@@ -739,17 +766,29 @@ function ttUn(delta) { const v = Math.max(0, (parseInt(tt.unidades) || 0) + delt
 function ttValidar() {
   const b = $('#ttsalvar'); if (!b) return;
   const u = parseInt(tt.unidades) || 0, s = ttSegundos();
-  b.disabled = !(tt.processo && tt.loja && s > 0 && u > 0);
+  b.disabled = !(procDe(tt.processo)?.ativo && (sessao.loja || tt.loja) && s > 0 && u > 0);
   $('#ttpu').textContent = s > 0 && u > 0 ? `${num1(s / u)} s por unidade` : '';
 }
 function ttGuardarUltimo() { store.set('rec_tt_ultimo', { processo: tt.processo, loja: tt.loja }); }
+// Estatísticas de uma lista de tomadas
+function estatTt(l) {
+  const n = l.length, t = l.reduce((a, r) => a + Number(r.tempo_seg), 0), u = l.reduce((a, r) => a + Number(r.unidades), 0);
+  const pu = l.map(r => r.tempo_seg / r.unidades);
+  return { n, t, u, porUn: u ? t / u : 0, mediaUn: n ? u / n : 0, mediaT: n ? t / n : 0, min: n ? Math.min(...pu) : 0, max: n ? Math.max(...pu) : 0 };
+}
+
 function vTempos() {
+  const ativos = procAtivos();
+  if (!ativos.length) return `<div class="empty">Ainda não há processos criados.<br><br>${isAdmin()
+    ? `<button class="btn pri sm" onclick="irTab('processos')">Criar o primeiro processo</button>` : 'Peça ao admin para criar os processos.'}</div>`;
+  const p = procDe(tt.processo)?.ativo ? procDe(tt.processo) : null;
   const s = ttSegundos(), m = Math.floor(s / 60);
-  const meus = porData(registros('recolha_tempos')).filter(r => r._pendente || r.meu).slice(0, 5);
+  const est = p ? estatTt(registros('recolha_tempos').filter(r => r.processo_id === p.id)) : null;
   return `<section class="card">
-      <div class="fld"><label class="f">Processo</label><select class="in" onchange="tt.processo=this.value;ttGuardarUltimo();ttValidar()">
-        <option value="">Selecione…</option>${PROCESSOS.map(p => `<option ${tt.processo === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></div>
-      <div class="fld" style="margin:0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
+      <div class="fld"><label class="f">Processo</label><select class="in" onchange="tt.processo=this.value;ttGuardarUltimo();render()">
+        <option value="">Selecione…</option>${ativos.map(x => `<option value="${esc(x.id)}" ${p?.id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>
+      ${p ? `<div class="como"><b>Como acompanhar</b><p>${esc(p.descricao || 'Sem descrição.')}</p><span class="chip">Unidade de medida: ${esc(p.unidade)}</span></div>` : ''}
+      <div class="fld" style="margin:14px 0 0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
     </section>
     <section class="card crono">
       <h2>Tempo</h2>
@@ -761,7 +800,7 @@ function vTempos() {
         <label><input class="in" id="tts" inputmode="decimal" value="${s > 0 ? (s - m * 60).toFixed(1) : ''}" placeholder="0" oninput="ttManual()"> seg</label></div>
     </section>
     <section class="card">
-      <h2>Unidades</h2>
+      <h2>${esc(rotuloUn(p?.unidade))}</h2>
       <div class="stepper"><button class="btn sec" onclick="ttUn(-1)">−</button>
         <input class="in" id="ttu" inputmode="numeric" value="${esc(tt.unidades)}" placeholder="0" oninput="tt.unidades=this.value.replace(/\\D/g,'');this.value=tt.unidades;ttValidar()">
         <button class="btn sec" onclick="ttUn(1)">+</button></div>
@@ -770,42 +809,73 @@ function vTempos() {
     </section>
     <p class="pu" id="ttpu"></p>
     <button class="btn pri" id="ttsalvar" onclick="ttSalvar()" disabled>Salvar tomada de tempo</button>
-    ${meus.length ? `<h3 class="sec">Seus últimos registros</h3>${meus.map(vTtItem).join('')}` : ''}`;
+    ${est?.n ? `<button class="tool" style="margin-top:16px" onclick="ttFiltros.processo='${esc(p.id)}';irTab('registros')"><span class="lg">${IC.chart.replace('currentColor', '#fff')}</span>
+      <span class="tx"><b>${esc(p.nome)}</b><span>${plural(est.n, 'tomada', 'tomadas')} · ${num1(est.porUn)} s por unidade em média</span><small>Ver painel do processo</small></span><span class="go">›</span></button>` : ''}`;
 }
 function ttSalvar() {
   if (tt.t0) { tt.acum = ttSegundos(); tt.t0 = null; }
-  const loja = sessao.loja || tt.loja, seg = Math.round(tt.acum * 10) / 10, un = parseInt(tt.unidades) || 0;
-  if (!tt.processo || !loja || seg <= 0 || un <= 0) return;
-  const r = { id: uid(), criado_em: new Date().toISOString(), loja, cluster: CLUSTER_DE[loja], processo: tt.processo,
+  const p = procDe(tt.processo), loja = sessao.loja || tt.loja, seg = Math.round(tt.acum * 10) / 10, un = parseInt(tt.unidades) || 0;
+  if (!p?.ativo || !loja || seg <= 0 || un <= 0) return;
+  const r = { id: uid(), criado_em: new Date().toISOString(), loja, cluster: CLUSTER_DE[loja], processo_id: p.id, processo: p.nome, unidade: p.unidade,
               tempo_seg: seg, unidades: un, obs: tt.obs.trim(), usuario: sessao.nome };
   if (!guardarNaFila('recolha_tempos', r)) return;
   tt.acum = 0; tt.unidades = ''; tt.obs = '';
-  render(); scrollTo(0, 0); toast(`Salvo ✓ ${fmtTempo(seg)} · ${plural(un, 'unidade', 'unidades')}`); sincronizar();
+  render(); scrollTo(0, 0); toast(`Salvo ✓ ${fmtTempo(seg)} · ${un} ${minusc(p.unidade)}`); sincronizar();
 }
 function vTtItem(r) {
   return `<button class="item" onclick="detalheTt('${esc(r.id)}')">
     <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(r.loja)}</span></div>
     <div class="l2">${esc(r.processo)}</div>
-    <span class="chip">${fmtTempo(r.tempo_seg)} · ${plural(r.unidades, 'un', 'un')} · ${num1(r.tempo_seg / r.unidades)} s/un</span></button>`;
+    <span class="chip">${fmtTempo(r.tempo_seg)} · ${r.unidades} ${esc(minusc(r.unidade || 'unidades'))} · ${num1(r.tempo_seg / r.unidades)} s/un</span></button>`;
 }
-function ttFiltrar() { return registros('recolha_tempos').filter(r => (!ttFiltros.processo || r.processo === ttFiltros.processo) && (!ttFiltros.loja || r.loja === ttFiltros.loja)); }
-function vTemposLista() {
+function ttFiltrar() { return registros('recolha_tempos').filter(r => (!ttFiltros.processo || chaveProc(r) === ttFiltros.processo) && (!ttFiltros.loja || r.loja === ttFiltros.loja)); }
+// Processos que aparecem no painel: os criados pelo admin + os que só existem nos registros (antigos)
+function procsPainel() {
+  const m = new Map(processos.map(p => [p.id, { nome: p.nome, unidade: p.unidade }]));
+  registros('recolha_tempos').forEach(r => { const k = chaveProc(r); if (!m.has(k)) m.set(k, { nome: r.processo, unidade: r.unidade || 'Unidades' }); });
+  return m;
+}
+function vTemposPainel() {
+  const procs = procsPainel(), sel = ttFiltros.processo && procs.has(ttFiltros.processo) ? ttFiltros.processo : '';
+  const selP = `<select class="in" onchange="ttFiltros.processo=this.value;render()"><option value="">Todos os processos</option>
+    ${[...procs].map(([k, p]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>`;
+  const selL = isLoja() ? '' : `<select class="in" onchange="ttFiltros.loja=this.value;render()"><option value="">Todas as lojas</option>
+    ${LOJAS.map(l => `<option ${ttFiltros.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</select>`;
   const lista = porData(ttFiltrar());
-  const resumo = [...new Set(lista.map(r => r.processo))].sort().map(p => {
-    const l = lista.filter(r => r.processo === p), t = l.reduce((a, r) => a + Number(r.tempo_seg), 0), u = l.reduce((a, r) => a + Number(r.unidades), 0);
-    return `<li><span>${esc(p)}<br><span class="mut sm-t">${plural(l.length, 'tomada', 'tomadas')} · ${u} un</span></span><b>${num1(t / u)} s/un</b></li>`;
-  }).join('');
-  const sel = (k, opts, ph) => `<select class="in" onchange="ttFiltros.${k}=this.value;render()"><option value="">${ph}</option>${opts.map(o => `<option ${ttFiltros[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-  return `<section class="card"><div class="g2">${sel('processo', PROCESSOS, 'Todos os processos')}${isLoja() ? '' : sel('loja', LOJAS.map(l => l[0]), 'Todas as lojas')}</div></section>
-    ${resumo ? `<section class="card"><h2>Média por processo</h2><ul class="top3">${resumo}</ul>
-      <p class="mut sm-t" style="margin:8px 0 0">Média ponderada: tempo total ÷ unidades totais.</p></section>` : ''}
-    ${isAdmin() && lista.length ? `<button class="btn sec" style="margin-bottom:12px" onclick="exportarTt()">Exportar para Excel (${lista.length})</button>` : ''}
-    <p class="mut sm-t" style="margin:4px 4px 10px">${plural(lista.length, 'registro', 'registros')} · toque num registro para ver ou excluir</p>
-    ${lista.length ? lista.map(vTtItem).join('') : '<div class="empty">Nenhuma tomada de tempo ainda.</div>'}`;
+  let corpo;
+  if (!sel) {
+    const cards = [...procs].map(([k, p]) => ({ k, p, e: estatTt(lista.filter(r => chaveProc(r) === k)) })).filter(x => x.e.n);
+    corpo = cards.length ? `<h3 class="sec">Escolha um processo</h3>${cards.map(({ k, p, e }) => `<button class="tool" onclick="ttFiltros.processo='${esc(k)}';render();scrollTo(0,0)">
+        <span class="lg">${IC.relogio}</span><span class="tx"><b>${esc(p.nome)}</b><span>${plural(e.n, 'tomada', 'tomadas')} · ${e.u} ${esc(minusc(p.unidade))}</span>
+        <small>${num1(e.porUn)} s por unidade</small></span><span class="go">›</span></button>`).join('')}`
+      : '<div class="empty">Nenhuma tomada de tempo ainda.</div>';
+  } else {
+    const p = procs.get(sel), e = estatTt(lista);
+    const porLoja = [...new Set(lista.map(r => r.loja))].map(l => [l, estatTt(lista.filter(r => r.loja === l))]).sort((a, b) => b[1].porUn - a[1].porUn);
+    const maxL = porLoja[0]?.[1].porUn || 1;
+    corpo = !e.n ? '<div class="empty">Sem tomadas para este processo com estes filtros.</div>' : `
+      <div class="kg">
+        <div class="kpi"><b>${e.n}</b><span>registros</span></div>
+        <div class="kpi"><b>${num1(e.porUn)} s</b><span>tempo por unidade</span></div>
+        <div class="kpi"><b>${num1(e.mediaUn)}</b><span>${esc(minusc(p.unidade))} por tomada (média)</span></div>
+        <div class="kpi"><b>${fmtTempo(e.mediaT)}</b><span>tempo médio por tomada</span></div>
+      </div>
+      <section class="card"><h2>Variação do tempo por unidade</h2>
+        <div class="row" style="text-align:center"><div><b style="font-size:20px">${num1(e.min)} s</b><div class="mut sm-t">mais rápida</div></div>
+        <div><b style="font-size:20px">${num1(e.porUn)} s</b><div class="mut sm-t">média</div></div>
+        <div><b style="font-size:20px">${num1(e.max)} s</b><div class="mut sm-t">mais lenta</div></div></div>
+        <p class="mut sm-t" style="margin:10px 0 0">Total: ${fmtTempo(e.t)} para ${e.u} ${esc(minusc(p.unidade))}. Média = tempo total ÷ unidades totais.</p></section>
+      ${porLoja.length > 1 ? `<section class="card"><h2>Tempo por unidade, por loja</h2>
+        ${porLoja.map(([l, x]) => `<div class="par"><div class="n rk"><span>${esc(l)}</span><b>${num1(x.porUn)} s</b></div>
+          <div class="bar"><i style="width:${(x.porUn / maxL * 100).toFixed(1)}%"></i></div><div class="v">${plural(x.n, 'tomada', 'tomadas')}</div></div>`).join('')}</section>` : ''}
+      ${isAdmin() ? `<button class="btn sec" style="margin-bottom:12px" onclick="exportarTt()">Exportar para Excel (${lista.length})</button>` : ''}
+      <h3 class="sec">Registros · toque para ver ou excluir</h3>${lista.map(vTtItem).join('')}`;
+  }
+  return `<section class="card"><div class="g2">${selP}${selL}</div></section>${corpo}`;
 }
 function detalheTt(id) {
   const r = registros('recolha_tempos').find(x => x.id === id); if (!r) return;
-  abrirSheet(`<div class="res"><small>${esc(r.processo)}</small><div class="c">${fmtTempo(r.tempo_seg)} · ${plural(r.unidades, 'unidade', 'unidades')}</div></div>
+  abrirSheet(`<div class="res"><small>${esc(r.processo)}</small><div class="c">${fmtTempo(r.tempo_seg)} · ${r.unidades} ${esc(minusc(r.unidade || 'unidades'))}</div></div>
     <dl class="kv"><dt>Por unidade</dt><dd>${num1(r.tempo_seg / r.unidades)} s</dd><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd>
       <dt>Loja</dt><dd>${esc(r.loja)}</dd><dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
       ${r.obs ? `<dt>Observação</dt><dd>${esc(r.obs)}</dd>` : ''}<dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
@@ -815,17 +885,61 @@ function detalheTt(id) {
 function exportarTt() {
   if (!isAdmin()) return;
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', n2 = v => String(v).replace('.', ',');
-  const cols = ['id', 'data_hora', 'loja', 'cluster', 'processo', 'tempo_seg', 'tempo_mm_ss', 'unidades', 'seg_por_unidade', 'obs', 'usuario'];
-  const linhas = porData(ttFiltrar()).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.processo, n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades,
+  const cols = ['id', 'data_hora', 'loja', 'cluster', 'processo', 'unidade_medida', 'tempo_seg', 'tempo_mm_ss', 'unidades', 'seg_por_unidade', 'obs', 'usuario'];
+  const linhas = porData(ttFiltrar()).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.processo, r.unidade, n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades,
     n2((r.tempo_seg / r.unidades).toFixed(2)), r.obs, r.usuario].map(q).join(';'));
   baixar('﻿' + [cols.join(';'), ...linhas].join('\r\n'), `tomada-tempos_${hojeISO()}.csv`);
 }
 
+// ── Processos da Tomada de Tempos (admin) ──────────────────────────────
+function vProcessos() {
+  const n = id => registros('recolha_tempos').filter(r => r.processo_id === id).length;
+  return `<button class="btn pri" style="margin-bottom:14px" onclick="abrirProcesso(null)">+ Novo processo</button>
+    ${processos.length ? processos.map(p => `<button class="item" onclick="abrirProcesso('${esc(p.id)}')">
+      <div class="l1"><span>${esc(p.unidade)}</span><span>${p.ativo ? '' : '<span class="pend">inativo</span>'}</span></div>
+      <div class="l2">${esc(p.nome)}</div><span class="chip">${plural(n(p.id), 'registro', 'registros')}</span></button>`).join('')
+      : '<div class="empty">Nenhum processo criado.</div>'}
+    <p class="mut sm-t" style="margin:10px 4px">Os consultores só podem escolher processos ativos. Um processo com registros não é apagado: fica inativo e o histórico mantém-se.</p>`;
+}
+let procEd = null;
+function abrirProcesso(id) {
+  const p = id ? procDe(id) : null;
+  procEd = { id: p?.id || null, nome: p?.nome || '', unidade: p?.unidade || '', descricao: p?.descricao || '', ativo: p ? p.ativo : true };
+  abrirSheet(`<h2 class="sh">${p ? 'Editar processo' : 'Novo processo'}</h2>
+    <div class="fld"><label class="f">Nome do processo</label><input class="in" value="${esc(procEd.nome)}" placeholder="Ex.: Troca de etiquetas" oninput="procEd.nome=this.value"></div>
+    <div class="fld"><label class="f">Unidade de medida</label><input class="in" value="${esc(procEd.unidade)}" placeholder="Ex.: Etiquetas de preço, Produtos, Caixas"
+      oninput="procEd.unidade=this.value;$('#prev').textContent=procEd.unidade.trim()?'Vai aparecer: '+rotuloUn(procEd.unidade.trim()):''">
+      <p class="mut sm-t" id="prev" style="margin:6px 2px 0">${procEd.unidade ? 'Vai aparecer: ' + esc(rotuloUn(procEd.unidade)) : ''}</p></div>
+    <div class="fld"><label class="f">Como acompanhar</label><textarea class="in" rows="5" placeholder="Quando começa e acaba a medição, o que contar, cuidados…" oninput="procEd.descricao=this.value">${esc(procEd.descricao)}</textarea></div>
+    ${p ? `<label class="chk"><input type="checkbox" ${procEd.ativo ? 'checked' : ''} onchange="procEd.ativo=this.checked"> Ativo (aparece para os consultores)</label>` : ''}
+    <div class="err" id="perr"></div>
+    <button class="btn pri" id="bproc" onclick="salvarProcesso()">Salvar processo</button>
+    ${p ? `<button class="btn danger" onclick="excluirProcesso('${esc(p.id)}')">Excluir processo</button>` : ''}
+    <button class="btn ghost" onclick="fecharSheet()">Cancelar</button>`);
+}
+async function salvarProcesso() {
+  if (!procEd.nome.trim() || !procEd.unidade.trim()) return $('#perr').textContent = 'Preencha o nome e a unidade de medida.';
+  $('#bproc').disabled = true;
+  try {
+    await rpc('adm_tt_processo_salvar', { p_token: sessao.token, p_id: procEd.id, p_nome: procEd.nome, p_unidade: procEd.unidade, p_descricao: procEd.descricao, p_ativo: procEd.ativo });
+    await carregarProcessos(); if (procEd.id) { cache.recolha_tempos = await rpc('tt_listar', { p_token: sessao.token }); store.set(cacheKey('recolha_tempos'), cache.recolha_tempos); }
+    fecharSheet(); render(); toast('Processo salvo ✓');
+  } catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); $('#perr').textContent = msgErro(e); $('#bproc').disabled = false; }
+}
+async function excluirProcesso(id) {
+  if (!confirm('Excluir este processo? Se já tiver registros, fica só inativo e o histórico mantém-se.')) return;
+  try {
+    const r = await rpc('adm_tt_processo_excluir', { p_token: sessao.token, p_id: id });
+    await carregarProcessos(); fecharSheet(); render();
+    toast(r === 'desativado' ? 'Tinha registros: ficou inativo' : 'Processo excluído');
+  } catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); $('#perr').textContent = msgErro(e); }
+}
+
 // ── CSV do apontamento de falta (exportação do admin / importação da versão antiga) ──
-const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pacote', 'produto', 'usuario', 'causa_raiz', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
+const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pacote', 'produto', 'usuario', 'causa_raiz', 'local_encontrado', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
 function toCSV(recs) {
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const linhas = porData(recs).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.pacote, r.produto, r.usuario, r.causa_raiz, r.tipo,
+  const linhas = porData(recs).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.pacote, r.produto, r.usuario, r.causa_raiz, r.local_encontrado, r.tipo,
     (r.caminho || []).map(p => `${p.pergunta} → ${p.resposta}`).join(' | '), r.criado_em, JSON.stringify(r.caminho || [])].map(q).join(';'));
   return '﻿' + [COLS.join(';'), ...linhas].join('\r\n');
 }
@@ -861,7 +975,7 @@ $('#imp').addEventListener('change', async e => {
       if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso)) || !CLUSTER_DE[l.loja] || !l.pacote) { invalidos++; continue; }
       if (ids.has(l.id)) { repetidos++; continue; }
       fila.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: CLUSTER_DE[l.loja], pacote: l.pacote, produto: l.produto,
-        usuario: l.usuario, causa_raiz: l.causa_raiz, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam,
+        usuario: l.usuario, causa_raiz: l.causa_raiz, local_encontrado: l.local_encontrado || null, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam,
         versao: VERSAO, _tool: 'apontamento_falta', _dono: sessao.username });
       ids.add(l.id); novos++;
     }
@@ -920,12 +1034,29 @@ function vPainel() {
       <div class="v">${n} · ${(n / causas.length * 100).toFixed(0)}% · acumulado ${(acum / causas.length * 100).toFixed(0)}%</div></div>`; }).join('')
       : '<div class="empty" style="padding:16px">Sem dados para mostrar.</div>'}
     ${inc ? `<p class="sm-t" style="color:var(--warn);margin:4px 0 0">⚠ ${plural(inc, 'inconsistência', 'inconsistências')} fora do Pareto.</p>` : ''}</section>
+  ${vRanking('cluster', 'Registros por cluster', contarPor(f, r => r.cluster))}
+  ${vRanking('loja', 'Registros por loja', contarPor(f, r => r.loja))}
+  ${vRanking('pacote', 'Registros por pacote', contarPor(f, r => r.pacote))}
+  ${vRanking('local', 'Outros locais onde o produto estava', contarPor(f.filter(r => r.local_encontrado), r => r.local_encontrado.trim()))}
   ${isAdmin() ? `<section class="card"><h2>Exportar para Excel</h2>
     <button class="btn pri" onclick="exportar(true)" ${f.length ? '' : 'disabled'}>Exportar filtrado (${f.length})</button>
     <button class="btn sec" onclick="exportar(false)" ${todos.length ? '' : 'disabled'}>Exportar tudo (${todos.length})</button></section>
   <section class="card"><h2>Arquivos da versão antiga</h2>
     <p class="mut sm-t" style="margin:0 0 10px">CSV recebidos por WhatsApp antes da base de dados central. São enviados para a base (sem duplicar).</p>
     <button class="btn sec sm" onclick="$('#imp').click()">Importar arquivos CSV</button></section>` : ''}`;
+}
+function contarPor(recs, chave) {
+  const m = new Map(); recs.forEach(r => { const k = chave(r) || '—'; m.set(k, (m.get(k) || 0) + 1); });
+  return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+let rankTodos = {};
+function vRanking(id, titulo, pares, limite = 8) {
+  if (!pares.length) return '';
+  const max = pares[0][1], tot = pares.reduce((a, p) => a + p[1], 0), n = rankTodos[id] ? pares.length : limite;
+  return `<section class="card"><h2>${esc(titulo)}</h2>
+    ${pares.slice(0, n).map(([k, v]) => `<div class="par"><div class="n rk"><span>${esc(k)}</span><b>${v} <small class="mut">· ${(v / tot * 100).toFixed(0)}%</small></b></div>
+      <div class="bar"><i style="width:${(v / max * 100).toFixed(1)}%"></i></div></div>`).join('')}
+    ${pares.length > limite ? `<button class="btn ghost sm" onclick="rankTodos['${id}']=!rankTodos['${id}'];render()">${rankTodos[id] ? 'Mostrar menos' : `Ver todos (${pares.length})`}</button>` : ''}</section>`;
 }
 function exportar(soFiltrado) {
   if (!isAdmin()) return;
