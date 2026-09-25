@@ -1,6 +1,6 @@
 {
-  "name": "Apontamento de Falta",
-  "short_name": "Falta",
+  "name": "Recolha de Dados Araujo",
+  "short_name": "Recolha",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

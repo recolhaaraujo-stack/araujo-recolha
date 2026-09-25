@@ -1,5 +1,5 @@
 // Network-first: sempre a versão mais recente quando há rede; cache só para funcionar offline.
-const CACHE = 'apontamento-falta-v1';
+const CACHE = 'recolha-araujo-v2';
 const ARQS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQS))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#103273">
-<title>Apontamento de Falta</title>
+<title>Recolha Araujo</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Falta">
+<meta name="apple-mobile-web-app-title" content="Recolha">
 <style>
 :root{--kb:#103273;--kb2:#1f55b8;--bg:#f2f4f8;--card:#fff;--ink:#14213d;--mut:#667085;--line:#e2e6ee;--soft:#e9eef8;--warn:#9a3b00;--warnbg:#fff1e0;--warnln:#f5b56b;--r:18px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -112,6 +112,14 @@ dl.kv dt{color:var(--mut)}dl.kv dd{margin:0;font-weight:600}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%);background:#14213d;color:#fff;padding:12px 18px;border-radius:12px;font-size:15px;z-index:30;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100% - 32px);text-align:center}
 #toast.on{opacity:1}
 .ver{text-align:center;font-size:12px;color:var(--mut);margin-top:18px}
+.tool{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:#fff;border:0;border-radius:var(--r);padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.06);cursor:pointer}
+.tool .lg{flex:none;width:52px;height:52px;border-radius:14px;background:var(--kb);display:grid;place-items:center}
+.tool .tx{flex:1;min-width:0}.tool .tx b{display:block;font-size:17px}.tool .tx span{display:block;color:var(--mut);font-size:14px;margin-top:2px}
+.tool .tx small{display:block;color:var(--kb2);font-weight:600;font-size:13px;margin-top:6px}
+.tool .go{font-size:28px;color:var(--mut)}
+#sync{cursor:pointer;white-space:nowrap}
+.pend{color:var(--warn);font-weight:600}
+.top button[aria-label]{font-size:22px;padding:4px 12px}
 </style>
 </head>
 <body>
@@ -121,7 +129,7 @@ dl.kv dt{color:var(--mut)}dl.kv dd{margin:0;font-weight:600}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '1.0';
+const VERSAO = '2.0';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -201,18 +209,44 @@ N.vendas   = { q: 'Desde o último recebimento, quantas das unidades recebidas f
 N.inv      = { q: 'Foi feita conferência no Inventário Rotativo desde o recebimento?',
                opts: [['Sim, e o estoque batia', fim(C.FURTO)], ['Não / sem dado', fim(C.FPARC)]] };
 
-// ── Armazenamento local ────────────────────────────────────────────────
+// ── Base de dados central (Supabase) ───────────────────────────────────
+const SUPA_URL = 'https://zayzrqeceajniqshvmew.supabase.co';
+const SUPA_KEY = 'sb_publishable_rz7iLpAU1As26mw_iZFElQ_RyCBNW7m';
+async function rpc(fn, args) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers: { apikey: SUPA_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+  const txt = await r.text(); let j = null; try { j = txt ? JSON.parse(txt) : null; } catch {}
+  if (!r.ok) throw new Error(j?.message || `Erro ${r.status}`);
+  return j;
+}
+
+// ── Ferramentas da app (cada utilizador só vê as que tem acesso) ────────
+const FERRAMENTAS = {
+  apontamento_falta: { nome: 'Apontamento de Falta', desc: 'Mapear a causa raiz de uma falta no clique e retire.', icone: 'lupa' },
+};
+
+// ── Estado e armazenamento local ───────────────────────────────────────
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
-let registros = store.get('af_registros', []);
-let sessao = store.get('af_sessao', null);
+let sessao = store.get('rec_sessao', null);   // { token, username, nome, loja, is_admin, ferramentas }
+let fila = store.get('rec_af_fila', []);       // registros ainda não enviados (de qualquer utilizador deste aparelho)
+let cache = [];                                 // registros vindos do servidor, do utilizador atual
+let sync = { estado: 'ok', erro: '' };          // ok | enviando | offline | erro
+let tela = 'home';
 let tab = 'inicio';
 let flow = null;
 let filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' };
-const salvar = () => store.set('af_registros', registros);
+const salvarFila = () => store.set('rec_af_fila', fila);
+const cacheKey = () => 'rec_af_cache_' + sessao.username;
+const carregarCache = () => { cache = store.get(cacheKey(), []); };
+const minhaFila = () => fila.filter(r => r._dono === sessao.username);
+function registros() {
+  const ids = new Set(cache.map(r => r.id));
+  return [...cache, ...minhaFila().filter(r => !ids.has(r.id)).map(r => ({ ...r, _pendente: true }))];
+}
 
 // ── Utilitários ────────────────────────────────────────────────────────
 const $ = s => document.querySelector(s);
@@ -223,10 +257,11 @@ const pad = n => String(n).padStart(2, '0');
 const fmtData = iso => { const d = new Date(iso); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const slug = s => norm(s).toLowerCase().replace(/ /g, '-');
-const isAdmin = () => sessao?.tipo === 'admin';
-const meus = () => registros.filter(r => r.loja === sessao.loja);
-const visiveis = () => isAdmin() ? registros : meus();
-const porData = arr => [...arr].sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+const isAdmin = () => !!sessao?.is_admin;
+const temAcesso = k => isAdmin() || (sessao?.ferramentas || []).includes(k);
+const minhasFerramentas = () => Object.keys(FERRAMENTAS).filter(temAcesso);
+const porData = arr => [...arr].sort((a, b) => Date.parse(b.criado_em) - Date.parse(a.criado_em));
+const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
 
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
@@ -239,112 +274,173 @@ const IC = {
   lupa: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
 };
 
+// ── Sincronização ──────────────────────────────────────────────────────
+let sincronizando = false, ultimaAssinatura = '';
+const assinatura = () => `${cache.length}|${cache[0]?.id || ''}|${minhaFila().length}`;
+function textoSync() {
+  const n = minhaFila().length;
+  if (sync.estado === 'enviando') return 'Sincronizando…';
+  if (sync.estado === 'offline') return n ? `Sem internet · ${n} pendente${n > 1 ? 's' : ''}` : 'Sem internet';
+  if (sync.estado === 'erro') return n ? `⚠ ${n} não enviado${n > 1 ? 's' : ''} · tocar para tentar` : '⚠ Erro · tocar para tentar';
+  return n ? `${n} pendente${n > 1 ? 's' : ''}` : '✓ Sincronizado';
+}
+function atualizarSync() { const el = $('#sync'); if (el) el.textContent = textoSync(); }
+async function sincronizar() {
+  if (!sessao || sincronizando) return;
+  if (!navigator.onLine) { sync.estado = 'offline'; atualizarSync(); return; }
+  sincronizando = true; sync.estado = 'enviando'; atualizarSync();
+  try {
+    const pend = minhaFila();
+    if (pend.length) {
+      const res = await rpc('af_inserir', { p_token: sessao.token, p_registros: pend.map(({ _dono, _pendente, ...r }) => r) });
+      const ok = new Set(res.ok);
+      fila = fila.filter(r => !(r._dono === sessao.username && ok.has(r.id))); salvarFila();
+      if (res.erro.length) console.warn('Registros recusados pelo servidor:', res.erro);
+    }
+    if (temAcesso('apontamento_falta')) { cache = await rpc('af_listar', { p_token: sessao.token }); store.set(cacheKey(), cache); }
+    sync.estado = minhaFila().length ? 'erro' : 'ok'; sync.erro = '';
+  } catch (e) {
+    if (e.message === 'SESSAO_INVALIDA') { sincronizando = false; return expirou(); }
+    sync.estado = navigator.onLine ? 'erro' : 'offline'; sync.erro = e.message;
+  }
+  sincronizando = false;
+  const a = assinatura();
+  if (a !== ultimaAssinatura && !flow) { ultimaAssinatura = a; render(); } else atualizarSync();
+}
+function expirou() {
+  sessao = null; store.del('rec_sessao'); render();
+  alert('Sua sessão expirou. Entre novamente. Os apontamentos não enviados continuam guardados neste aparelho.');
+}
+addEventListener('online', sincronizar);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sincronizar(); });
+setInterval(() => { if (document.visibilityState === 'visible') sincronizar(); }, 60000);
+
 // ── Render principal ───────────────────────────────────────────────────
 function render() {
   const app = $('#app');
   if (!sessao) return app.innerHTML = vLogin();
   if (flow) return app.innerHTML = vFlow();
+  const multi = isAdmin() || minhasFerramentas().length > 1;
+  if (tela === 'home' || !temAcesso(tela)) { tela = 'home'; return app.innerHTML = shell(sessao.nome, 'Recolha de Dados · Araujo', vHome(), null, false); }
+  const f = FERRAMENTAS[tela];
   const tabs = isAdmin()
     ? [['inicio', 'Painel', IC.chart], ['registros', 'Registros', IC.list]]
     : [['inicio', 'Início', IC.home], ['registros', 'Histórico', IC.list]];
-  const titulo = isAdmin() ? 'Painel Kaizen' : sessao.loja;
-  const sub = isAdmin() ? 'Apontamento de Falta · todas as lojas' : CLUSTER_DE[sessao.loja];
-  let corpo = '';
-  if (tab === 'inicio') corpo = isAdmin() ? vPainel() : vInicioLoja();
-  else corpo = vRegistros();
-  app.innerHTML = `
-    <header class="top"><div class="t"><h1>${esc(titulo)}</h1><small>${esc(sub)}</small></div>
+  const sub = CLUSTER_DE[sessao.loja] || f.nome;
+  const corpo = tab === 'inicio' ? (isAdmin() ? vPainel() : vInicioLoja()) : vRegistros();
+  app.innerHTML = shell(multi ? f.nome : sessao.nome, multi ? (sessao.loja || sessao.nome) : sub, corpo, tabs, multi);
+}
+function shell(titulo, sub, corpo, tabs, voltar) {
+  return `<header class="top">${voltar ? `<button onclick="irTela('home')" aria-label="Ferramentas">‹</button>` : ''}
+      <div class="t"><h1>${esc(titulo)}</h1><small>${esc(sub)} · <span id="sync" onclick="sincronizar()">${textoSync()}</span></small></div>
       <button onclick="sair()">Sair</button></header>
-    <main class="wrap">${corpo}<div class="ver">Apontamento de Falta · v${VERSAO}</div></main>
-    <nav class="tabs">${tabs.map(([k, l, i]) => `<button class="${tab === k ? 'on' : ''}" onclick="irTab('${k}')">${i}${l}</button>`).join('')}</nav>`;
+    <main class="wrap">${corpo}<div class="ver">Recolha de Dados · v${VERSAO}</div></main>
+    ${tabs ? `<nav class="tabs">${tabs.map(([k, l, i]) => `<button class="${tab === k ? 'on' : ''}" onclick="irTab('${k}')">${i}${l}</button>`).join('')}</nav>` : ''}`;
 }
 function irTab(k) { tab = k; render(); scrollTo(0, 0); }
+function irTela(k) { tela = k; tab = 'inicio'; render(); scrollTo(0, 0); }
+function telaInicial() { const fs = minhasFerramentas(); return !isAdmin() && fs.length === 1 ? fs[0] : 'home'; }
 
 // ── Login ──────────────────────────────────────────────────────────────
 function vLogin() {
   return `<div class="login"><div class="box">
-    <div class="brand"><div class="lg">${IC.lupa}</div><div><b>Apontamento de Falta</b><span class="mut">Clique e Retire · mapeamento de causa raiz</span></div></div>
+    <div class="brand"><div class="lg">${IC.lupa}</div><div><b>Recolha de Dados</b><span class="mut">Projeto Araujo · Kaizen Institute</span></div></div>
     <form onsubmit="entrar(event)" autocomplete="off">
       <div class="fld"><label class="f" for="u">Usuário</label>
-        <input class="in" id="u" list="lojas-dl" autocapitalize="characters" placeholder="Nome da loja"></div>
+        <input class="in" id="u" list="lojas-dl" autocapitalize="characters" placeholder="Usuário"></div>
       <datalist id="lojas-dl">${LOJAS.map(l => `<option value="${esc(l[0])}">`).join('')}</datalist>
       <div class="fld"><label class="f" for="p">Senha</label>
         <input class="in" id="p" type="password" placeholder="Senha"></div>
       <div class="err" id="lerr"></div>
-      <button class="btn pri" type="submit">Entrar</button>
+      <button class="btn pri" type="submit" id="bentrar">Entrar</button>
     </form></div></div>`;
 }
-function entrar(e) {
+async function entrar(e) {
   e.preventDefault();
-  const u = norm($('#u').value), p = norm($('#p').value);
-  if (u === 'ADMIN' && p === 'ADMIN') sessao = { tipo: 'admin' };
-  else {
-    const loja = LOJAS.find(([l]) => norm(l) === u);
-    if (loja && p === u) sessao = { tipo: 'loja', loja: loja[0] };
+  const btn = $('#bentrar'); btn.disabled = true; btn.textContent = 'Entrando…'; $('#lerr').textContent = '';
+  const u = norm($('#u').value), p = $('#p').value;
+  try {
+    sessao = await rpc('app_login', { p_username: u, p_senha: p, p_senha_norm: norm(p) });
+    store.set('rec_sessao', sessao); carregarCache(); tela = telaInicial(); tab = 'inicio';
+    ultimaAssinatura = assinatura(); render(); sincronizar();
+  } catch (err) {
+    sessao = null; btn.disabled = false; btn.textContent = 'Entrar';
+    $('#lerr').textContent = err.message === 'LOGIN_INVALIDO' ? 'Usuário ou senha incorretos.'
+      : 'Sem conexão com o servidor. Verifique a internet e tente de novo.';
   }
-  if (!sessao) { $('#lerr').textContent = 'Usuário ou senha incorretos.'; return; }
-  store.set('af_sessao', sessao); tab = 'inicio'; render();
 }
-function sair() {
-  if (!confirm('Sair da conta? Os apontamentos continuam salvos neste aparelho.')) return;
-  sessao = null; store.del('af_sessao'); render();
+async function sair() {
+  const n = minhaFila().length;
+  if (!confirm(n ? `Há ${plural(n, 'apontamento', 'apontamentos')} ainda não enviado${n > 1 ? 's' : ''}. Ficam guardados neste aparelho e são enviados no próximo login. Sair mesmo assim?` : 'Sair da conta?')) return;
+  const t = sessao.token; sessao = null; store.del('rec_sessao'); render();
+  rpc('app_logout', { p_token: t }).catch(() => {});
 }
 
-// ── Início (loja) ──────────────────────────────────────────────────────
+// ── Início: lista de ferramentas ───────────────────────────────────────
+function vHome() {
+  const fs = minhasFerramentas();
+  return `<section class="card hero"><h2>Olá${sessao.loja ? '' : ', ' + esc(sessao.nome)}</h2>
+      <p style="margin:0">Escolha a ferramenta de recolha de dados.</p></section>
+    ${fs.map(k => { const f = FERRAMENTAS[k]; const n = k === 'apontamento_falta' ? registros().length : 0;
+      return `<button class="tool" onclick="irTela('${k}')"><span class="lg">${IC[f.icone]}</span>
+        <span class="tx"><b>${esc(f.nome)}</b><span>${esc(f.desc)}</span><small>${plural(n, 'registro', 'registros')}${isAdmin() ? ' · todas as lojas' : ''}</small></span><span class="go">›</span></button>`; }).join('')}
+    ${fs.length ? '' : '<div class="empty">Seu usuário ainda não tem ferramentas liberadas. Fale com a Kaizen.</div>'}`;
+}
+
+// ── Apontamento de falta: início (loja) ────────────────────────────────
 function vInicioLoja() {
-  const recs = meus();
-  const ult = store.get('af_envio_' + sessao.loja, null);
-  const pend = recs.filter(r => !ult || r.criado_em > ult).length;
-  const mes = new Date().toISOString().slice(0, 7);
-  const doMes = recs.filter(r => r.criado_em.slice(0, 7) === mes);
+  const recs = registros(), n = minhaFila().length;
+  const mes = new Date(); const doMes = recs.filter(r => { const d = new Date(r.criado_em); return d.getMonth() === mes.getMonth() && d.getFullYear() === mes.getFullYear(); });
   const top = contar(doMes.filter(r => r.tipo === 'causa')).slice(0, 3);
   return `
   <section class="card hero"><h2>Nova falta apontada?</h2>
     <p>Responda às perguntas, uma de cada vez, até chegar à causa raiz.</p>
     <button class="btn light" onclick="novo()">+ Novo apontamento</button></section>
-  <section class="card"><h2>Enviar para a Kaizen</h2>
-    <p style="margin:0 0 12px">${recs.length === 0 ? 'Nenhum apontamento registrado ainda.'
-      : pend ? `<b>${pend}</b> apontamento${pend > 1 ? 's' : ''} novo${pend > 1 ? 's' : ''} desde o último envio.`
-      : 'Tudo enviado. ✓'}
-      ${ult ? `<br><span class="mut sm-t">Último envio: ${fmtData(ult)}</span>` : ''}</p>
-    <button class="btn sec" onclick="enviar()" ${recs.length ? '' : 'disabled'}>Enviar pelo WhatsApp</button>
-    <p class="mut sm-t" style="margin:10px 0 0">Gera um arquivo com todos os apontamentos da loja. Envie ao consultor Kaizen.</p></section>
+  ${n ? `<section class="card"><h2>Aguardando envio</h2>
+    <p style="margin:0 0 12px"><b>${plural(n, 'apontamento', 'apontamentos')}</b> ainda não chegou à Kaizen${sync.estado === 'offline' ? ' (sem internet)' : ''}. Será enviado automaticamente quando houver conexão.</p>
+    <button class="btn sec" onclick="sincronizar()">Tentar enviar agora</button></section>` : ''}
   <section class="card"><h2>Este mês</h2>
     <div class="kpis" style="margin:0 0 ${top.length ? 10 : 0}px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><b>${doMes.length}</b><span>apontamentos</span></div></div>
-    ${top.length ? `<ul class="top3">${top.map(([c, n]) => `<li><span>${esc(c)}</span><b>${n}</b></li>`).join('')}</ul>` : ''}</section>`;
+    ${top.length ? `<ul class="top3">${top.map(([c, k]) => `<li><span>${esc(c)}</span><b>${k}</b></li>`).join('')}</ul>` : ''}</section>`;
 }
 
 // ── Registros / histórico ──────────────────────────────────────────────
 function vItem(r) {
   const imp = r.tipo !== 'causa';
-  return `<button class="item ${imp ? 'imp' : ''}" onclick="detalhe('${r.id}')">
-    <div class="l1"><span>${fmtData(r.criado_em)}</span><span>${esc(isAdmin() ? r.loja : '')}</span></div>
+  return `<button class="item ${imp ? 'imp' : ''}" onclick="detalhe('${esc(r.id)}')">
+    <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(isAdmin() ? r.loja : '')}</span></div>
     <div class="l2">${esc(r.pacote)}${r.produto ? ' · ' + esc(r.produto) : ''}</div>
     <span class="chip ${imp ? 'imp' : ''}">${esc(imp ? '⚠ Inconsistência' : r.causa_raiz)}</span></button>`;
 }
 function vRegistros() {
-  const lista = porData(isAdmin() ? filtrar() : meus());
-  return `${isAdmin() ? vFiltros() : ''}
-    ${!isAdmin() ? `<button class="btn pri" style="margin-bottom:14px" onclick="novo()">+ Novo apontamento</button>` : ''}
-    <p class="mut sm-t" style="margin:4px 4px 10px">${lista.length} registro${lista.length === 1 ? '' : 's'}</p>
+  const lista = porData(isAdmin() ? filtrar() : registros());
+  return `${isAdmin() ? vFiltros() : `<button class="btn pri" style="margin-bottom:14px" onclick="novo()">+ Novo apontamento</button>`}
+    <p class="mut sm-t" style="margin:4px 4px 10px">${plural(lista.length, 'registro', 'registros')}</p>
     ${lista.length ? lista.map(vItem).join('') : `<div class="empty">Nenhum apontamento ${isAdmin() ? 'com estes filtros' : 'ainda'}.</div>`}`;
 }
 function detalhe(id) {
-  const r = registros.find(x => x.id === id); if (!r) return;
+  const r = registros().find(x => x.id === id); if (!r) return;
   const imp = r.tipo !== 'causa';
   abrirSheet(`
     <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Alerta de qualidade de dados' : 'Causa raiz'}</small><div class="c">${esc(r.causa_raiz)}</div></div>
     <dl class="kv"><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd><dt>Loja</dt><dd>${esc(r.loja)}</dd>
       <dt>Cluster</dt><dd>${esc(r.cluster)}</dd><dt>Pacote</dt><dd>${esc(r.pacote)}</dd>
-      ${r.produto ? `<dt>Produto</dt><dd>${esc(r.produto)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd></dl>
+      ${r.produto ? `<dt>Produto</dt><dd>${esc(r.produto)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
+      <dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
     <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Caminho percorrido</h2>
-    <div class="trail" style="padding-top:0">${vTrilha(r.caminho)}</div>
+    <div class="trail" style="padding-top:0">${vTrilha(r.caminho || [])}</div>
     <div style="margin-top:18px"><button class="btn sec" onclick="fecharSheet()">Fechar</button>
-    <button class="btn ghost sm" onclick="excluir('${r.id}')">Excluir apontamento</button></div>`);
+    <button class="btn ghost sm" onclick="excluir('${esc(r.id)}')">Excluir apontamento</button></div>`);
 }
-function excluir(id) {
-  if (!confirm('Excluir este apontamento deste aparelho?')) return;
-  registros = registros.filter(r => r.id !== id); salvar(); fecharSheet(); render(); toast('Apontamento excluído');
+async function excluir(id) {
+  if (!confirm('Excluir este apontamento? Ele sai também da base de dados da Kaizen.')) return;
+  if (cache.some(r => r.id === id)) {
+    try { await rpc('af_excluir', { p_token: sessao.token, p_id: id }); }
+    catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); alert('Não foi possível excluir agora. Verifique a internet e tente de novo.'); return; }
+    cache = cache.filter(r => r.id !== id); store.set(cacheKey(), cache);
+  }
+  fila = fila.filter(r => r.id !== id); salvarFila();
+  fecharSheet(); render(); toast('Apontamento excluído');
 }
 function abrirSheet(html) { const s = $('#sheet'); s.innerHTML = `<div class="bg" onclick="fecharSheet()"></div><div class="pn"><div class="grip"></div>${html}</div>`; s.classList.add('on'); }
 function fecharSheet() { $('#sheet').classList.remove('on'); }
@@ -352,7 +448,7 @@ const vTrilha = cam => `<ol>${cam.map(p => `<li>${esc(p.pergunta)} <b>${esc(p.re
 
 // ── Fluxo de mapeamento ────────────────────────────────────────────────
 function novo() {
-  flow = { etapa: 'dados', loja: isAdmin() ? '' : sessao.loja, pacote: '', produto: '', path: [], atual: 'inicio', fim: null };
+  flow = { etapa: 'dados', loja: sessao.loja || '', pacote: '', produto: '', path: [], atual: 'inicio', fim: null };
   history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0);
 }
 function avancar() { history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0); }
@@ -363,7 +459,7 @@ function responder(i) {
   if (alvo.next) flow.atual = alvo.next; else flow.fim = alvo.causa;
   avancar();
 }
-// Um passo atrás (chamado pelo botão "voltar" do navegador/Android ou pelo botão Voltar)
+// Um passo atrás (botão "voltar" do navegador/Android ou botão Voltar)
 function recuar() {
   if (!flow) return;
   if (flow.etapa === 'dados') { flow = null; }
@@ -387,7 +483,7 @@ function vFlow() {
     <button onclick="cancelar()">✕</button></header>`;
   let corpo;
   if (flow.etapa === 'dados') {
-    const lojaFld = isAdmin()
+    const lojaFld = !sessao.loja
       ? `<select class="in" onchange="flow.loja=this.value;dadosOk()"><option value="">Selecione…</option>
           ${CLUSTERS.map(c => `<optgroup label="${esc(c)}">${LOJAS.filter(l => l[1] === c).map(l => `<option ${flow.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</optgroup>`).join('')}</select>`
       : `<div class="in" style="background:var(--bg)">${esc(flow.loja)} <span class="mut sm-t">· ${esc(CLUSTER_DE[flow.loja])}</span></div>`;
@@ -424,21 +520,21 @@ function dadosOk() { const b = $('#bcomecar'); if (b) b.disabled = !(flow.loja &
 function gravar() {
   const r = {
     id: uid(), criado_em: new Date().toISOString(), loja: flow.loja, cluster: CLUSTER_DE[flow.loja],
-    pacote: flow.pacote, produto: flow.produto, usuario: isAdmin() ? 'admin' : sessao.loja,
+    pacote: flow.pacote, produto: flow.produto, usuario: sessao.nome,
     causa_raiz: flow.fim, tipo: flow.fim === IMPOSSIVEL ? 'inconsistencia' : 'causa',
-    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })), versao: VERSAO,
+    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })), versao: VERSAO, _dono: sessao.username,
   };
-  registros.push(r);
-  if (!salvar()) { registros.pop(); alert('Não foi possível salvar neste aparelho (armazenamento bloqueado ou cheio).'); return; }
-  tab = 'inicio'; sairFluxo(); toast('Apontamento salvo ✓');
+  fila.push(r);
+  if (!salvarFila()) { fila.pop(); alert('Não foi possível salvar neste aparelho (armazenamento bloqueado ou cheio).'); return; }
+  tab = 'inicio'; sairFluxo(); toast('Apontamento salvo ✓'); sincronizar();
 }
 
-// ── CSV (exportação / envio / importação) ──────────────────────────────
+// ── CSV (exportação do admin / importação de arquivos da versão antiga) ──
 const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pacote', 'produto', 'usuario', 'causa_raiz', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
 function toCSV(recs) {
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const linhas = porData(recs).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.pacote, r.produto, r.usuario, r.causa_raiz, r.tipo,
-    r.caminho.map(p => `${p.pergunta} → ${p.resposta}`).join(' | '), r.criado_em, JSON.stringify(r.caminho)].map(q).join(';'));
+    (r.caminho || []).map(p => `${p.pergunta} → ${p.resposta}`).join(' | '), r.criado_em, JSON.stringify(r.caminho || [])].map(q).join(';'));
   return '﻿' + [COLS.join(';'), ...linhas].join('\r\n');
 }
 function parseCSV(txt) {
@@ -457,56 +553,44 @@ function parseCSV(txt) {
   const [h, ...dados] = rows.filter(r => r.some(c => c !== ''));
   return (dados || []).map(r => Object.fromEntries(h.map((k, i) => [k.trim(), r[i] ?? ''])));
 }
-function nomeArq(parte) { return `apontamento-falta_${parte}_${hojeISO()}.csv`; }
+const nomeArq = parte => `apontamento-falta_${parte}_${hojeISO()}.csv`;
 function baixar(csv, nome) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
-async function enviar() {
-  const recs = meus(); if (!recs.length) return;
-  const nome = nomeArq(slug(sessao.loja)), csv = toCSV(recs);
-  const marcar = () => { store.set('af_envio_' + sessao.loja, new Date().toISOString()); render(); };
-  const file = new File([csv], nome, { type: 'text/csv' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file] }); marcar(); toast('Arquivo compartilhado ✓'); return; }
-    catch (e) { if (e.name === 'AbortError') return; }
-  }
-  baixar(csv, nome); marcar();
-  toast('Arquivo salvo em Downloads. Envie pelo WhatsApp ao consultor Kaizen.');
-}
 $('#imp').addEventListener('change', async e => {
   let novos = 0, repetidos = 0, invalidos = 0;
-  const ids = new Set(registros.map(r => r.id));
+  const ids = new Set(registros().map(r => r.id));
   for (const f of e.target.files) {
     let linhas; try { linhas = parseCSV(await f.text()); } catch { invalidos++; continue; }
     for (const l of linhas) {
       let cam; try { cam = JSON.parse(l.caminho_json || '[]'); } catch { cam = []; }
-      if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso))) { invalidos++; continue; }
+      if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso)) || !CLUSTER_DE[l.loja] || !l.pacote) { invalidos++; continue; }
       if (ids.has(l.id)) { repetidos++; continue; }
-      registros.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: l.cluster || CLUSTER_DE[l.loja] || '', pacote: l.pacote,
-        produto: l.produto, usuario: l.usuario, causa_raiz: l.causa_raiz, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam, versao: VERSAO });
+      fila.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: CLUSTER_DE[l.loja], pacote: l.pacote, produto: l.produto,
+        usuario: l.usuario, causa_raiz: l.causa_raiz, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam, versao: VERSAO, _dono: sessao.username });
       ids.add(l.id); novos++;
     }
   }
   e.target.value = '';
-  if (novos && !salvar()) { alert('Não foi possível salvar os dados importados neste aparelho.'); registros = store.get('af_registros', []); return; }
-  render();
-  alert(`Importação concluída\n\n${novos} novo(s)\n${repetidos} já existia(m)${invalidos ? `\n${invalidos} linha(s) inválida(s) ignorada(s)` : ''}`);
+  salvarFila(); render();
+  alert(`Importação concluída\n\n${novos} novo(s) — a enviar para a base de dados\n${repetidos} já existia(m)${invalidos ? `\n${invalidos} linha(s) inválida(s) ignorada(s)` : ''}`);
+  sincronizar();
 });
 
 // ── Painel admin ───────────────────────────────────────────────────────
 function filtrar() {
   const { cluster, loja, pacote, causa, de, ate } = filtros;
   const t0 = de ? new Date(de + 'T00:00:00').getTime() : -Infinity, t1 = ate ? new Date(ate + 'T23:59:59.999').getTime() : Infinity;
-  return registros.filter(r => (!cluster || r.cluster === cluster) && (!loja || r.loja === loja) && (!pacote || r.pacote === pacote)
+  return registros().filter(r => (!cluster || r.cluster === cluster) && (!loja || r.loja === loja) && (!pacote || r.pacote === pacote)
     && (!causa || r.causa_raiz === causa) && (t => t >= t0 && t <= t1)(new Date(r.criado_em).getTime()));
 }
 function contar(recs) {
   const m = new Map(); recs.forEach(r => m.set(r.causa_raiz, (m.get(r.causa_raiz) || 0) + 1));
   return [...m].sort((a, b) => b[1] - a[1]);
 }
-function setF(k, v) { filtros[k] = v; if (k === 'cluster' && filtros.loja && CLUSTER_DE[filtros.loja] !== v && v) filtros.loja = ''; filtrosAbertos = true; render(); }
 let filtrosAbertos = false;
+function setF(k, v) { filtros[k] = v; if (k === 'cluster' && filtros.loja && CLUSTER_DE[filtros.loja] !== v && v) filtros.loja = ''; filtrosAbertos = true; render(); }
 function limparF() { filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' }; render(); }
 function vFiltros() {
   const n = Object.values(filtros).filter(Boolean).length;
@@ -525,36 +609,43 @@ function vFiltros() {
     </div></details>`;
 }
 function vPainel() {
-  const f = filtrar(), causas = f.filter(r => r.tipo === 'causa'), inc = f.length - causas.length;
+  const todos = registros(), f = filtrar(), causas = f.filter(r => r.tipo === 'causa'), inc = f.length - causas.length;
   const par = contar(causas), max = par[0]?.[1] || 1; let acum = 0;
-  const lojasCom = new Set(f.map(r => r.loja)).size;
   return `
-  <section class="card hero"><h2>Consolidado</h2><div class="big">${registros.length} apontamentos</div>
-    <p>de ${new Set(registros.map(r => r.loja)).size} de ${LOJAS.length} lojas neste aparelho</p>
-    <div class="row"><button class="btn light sm" onclick="$('#imp').click()">Importar arquivos</button>
+  <section class="card hero"><h2>Base de dados central</h2><div class="big">${plural(todos.length, 'apontamento', 'apontamentos')}</div>
+    <p>${new Set(todos.map(r => r.loja)).size} de ${LOJAS.length} lojas já registraram</p>
+    <div class="row"><button class="btn light sm" onclick="sincronizar()">Atualizar</button>
     <button class="btn light sm" onclick="novo()">+ Novo</button></div></section>
   ${vFiltros()}
   <div class="kpis"><div class="kpi"><b>${f.length}</b><span>registros</span></div>
-    <div class="kpi"><b>${lojasCom}</b><span>lojas</span></div>
+    <div class="kpi"><b>${new Set(f.map(r => r.loja)).size}</b><span>lojas</span></div>
     <div class="kpi imp"><b>${inc}</b><span>inconsistências</span></div></div>
   <section class="card"><h2>Pareto de causas raiz</h2>
     ${par.length ? par.map(([c, n]) => { acum += n; return `<div class="par"><div class="n">${esc(c)}</div>
       <div class="bar"><i style="width:${(n / max * 100).toFixed(1)}%"></i></div>
       <div class="v">${n} · ${(n / causas.length * 100).toFixed(0)}% · acumulado ${(acum / causas.length * 100).toFixed(0)}%</div></div>`; }).join('')
       : '<div class="empty" style="padding:16px">Sem dados para mostrar.</div>'}
-    ${inc ? `<p class="sm-t" style="color:var(--warn);margin:4px 0 0">⚠ ${inc} inconsistência${inc > 1 ? 's' : ''} fora do Pareto.</p>` : ''}</section>
+    ${inc ? `<p class="sm-t" style="color:var(--warn);margin:4px 0 0">⚠ ${plural(inc, 'inconsistência', 'inconsistências')} fora do Pareto.</p>` : ''}</section>
   <section class="card"><h2>Exportar para Excel</h2>
     <button class="btn pri" onclick="exportar(true)" ${f.length ? '' : 'disabled'}>Exportar filtrado (${f.length})</button>
-    <button class="btn sec" onclick="exportar(false)" ${registros.length ? '' : 'disabled'}>Exportar tudo (${registros.length})</button></section>`;
+    <button class="btn sec" onclick="exportar(false)" ${todos.length ? '' : 'disabled'}>Exportar tudo (${todos.length})</button></section>
+  <section class="card"><h2>Arquivos da versão antiga</h2>
+    <p class="mut sm-t" style="margin:0 0 10px">CSV recebidos por WhatsApp antes da base de dados central. São enviados para a base (sem duplicar).</p>
+    <button class="btn sec sm" onclick="$('#imp').click()">Importar arquivos CSV</button></section>`;
 }
 function exportar(soFiltrado) {
-  const recs = soFiltrado ? filtrar() : registros;
-  baixar(toCSV(recs), nomeArq(soFiltrado ? 'filtrado' : 'todos'));
+  if (!isAdmin()) return;
+  baixar(toCSV(soFiltrado ? filtrar() : registros()), nomeArq(soFiltrado ? 'filtrado' : 'todos'));
 }
 
-// ── PWA ────────────────────────────────────────────────────────────────
+// ── Arranque ───────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
-render();
+if (sessao) {
+  carregarCache(); tela = telaInicial(); ultimaAssinatura = assinatura(); render();
+  rpc('app_eu', { p_token: sessao.token })
+    .then(p => { sessao = { ...sessao, ...p }; store.set('rec_sessao', sessao); tela = temAcesso(tela) ? tela : telaInicial(); render(); sincronizar(); })
+    .catch(e => { if (e.message === 'SESSAO_INVALIDA') expirou(); else sincronizar(); });
+} else render();
 </script>
 </body>
 </html>
