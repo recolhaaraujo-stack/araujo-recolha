@@ -120,6 +120,25 @@ dl.kv dt{color:var(--mut)}dl.kv dd{margin:0;font-weight:600}
 #sync{cursor:pointer;white-space:nowrap}
 .pend{color:var(--warn);font-weight:600}
 .top button[aria-label]{font-size:22px;padding:4px 12px}
+h3.sec{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:22px 4px 10px}
+h2.sh{font-size:20px;margin:0 0 16px}
+.seg{display:flex;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:16px}
+.seg button{flex:1;border:0;background:none;padding:10px;border-radius:9px;font-weight:600;color:var(--mut);cursor:pointer}
+.seg button.on{background:#fff;color:var(--kb);box-shadow:0 1px 2px rgba(16,24,40,.12)}
+details.grp summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+details.grp summary::-webkit-details-marker{display:none}
+details.grp[open] summary{margin-bottom:8px}
+.urow{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:none;padding:12px 2px;cursor:pointer}
+.urow b{display:block;font-size:15px}.urow small{color:var(--mut);font-size:12px}.urow .go{color:var(--mut);font-size:22px}
+.crono{text-align:center}
+.crono .disp{font-size:56px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em;margin:4px 0 16px;color:var(--kb)}
+.btn.run{background:#b42318;color:#fff}
+.manual{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:14px;flex-wrap:wrap}
+.manual label{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:14px}
+.manual .in{width:76px;padding:10px;text-align:center}
+.stepper{display:flex;gap:10px}.stepper .btn{flex:0 0 64px;font-size:26px;padding:10px}.stepper .in{flex:1;text-align:center;font-size:26px;font-weight:700}
+.pu{text-align:center;font-weight:600;color:var(--kb2);min-height:22px;margin:4px 0 10px}
+.g2{display:grid;gap:10px}
 </style>
 </head>
 <body>
@@ -129,7 +148,7 @@ dl.kv dt{color:var(--mut)}dl.kv dd{margin:0;font-weight:600}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '2.0';
+const VERSAO = '3.0';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -219,11 +238,22 @@ async function rpc(fn, args) {
   if (!r.ok) throw new Error(j?.message || `Erro ${r.status}`);
   return j;
 }
-
-// ── Ferramentas da app (cada utilizador só vê as que tem acesso) ────────
-const FERRAMENTAS = {
-  apontamento_falta: { nome: 'Apontamento de Falta', desc: 'Mapear a causa raiz de uma falta no clique e retire.', icone: 'lupa' },
+const ERROS = {
+  LOGIN_INVALIDO: 'Usuário ou senha incorretos.', SEM_ACESSO: 'Seu usuário não tem acesso a isto.',
+  SENHA_CURTA: 'A senha precisa ter pelo menos 6 caracteres.', SENHA_ATUAL_ERRADA: 'A senha atual está errada.',
+  UTILIZADOR_EXISTE: 'Já existe uma conta com esse usuário.', DADOS_EM_FALTA: 'Preencha todos os campos.',
+  NAO_PODE_EXCLUIR_A_SI: 'Você não pode excluir a sua própria conta.', UTILIZADOR_NAO_EXISTE: 'Essa conta não existe mais.',
 };
+const msgErro = e => ERROS[e.message] || (/fetch|network|Failed/i.test(e.message) ? 'Sem conexão com o servidor. Verifique a internet.' : e.message);
+
+// ── Ferramentas da app ─────────────────────────────────────────────────
+const PROCESSOS = ['Processo A', 'Processo B', 'Processo C'];   // teste — depois uma lista por processo real
+const FERRAMENTAS = {
+  apontamento_falta: { nome: 'Apontamento de Falta', desc: 'Mapear a causa raiz de uma falta no clique e retire.', icone: 'lupa', rpc: 'af' },
+  recolha_tempos:    { nome: 'Tomada de Tempos', desc: 'Cronometrar um processo e registrar as unidades.', icone: 'relogio', rpc: 'tt' },
+};
+const PERFIS = { loja: 'Loja', consultor: 'Consultor', admin: 'Admin' };
+const PERFIS_PL = { loja: 'Lojas', consultor: 'Consultores', admin: 'Admins' };
 
 // ── Estado e armazenamento local ───────────────────────────────────────
 const store = {
@@ -231,21 +261,21 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
-let sessao = store.get('rec_sessao', null);   // { token, username, nome, loja, is_admin, ferramentas }
-let fila = store.get('rec_af_fila', []);       // registros ainda não enviados (de qualquer utilizador deste aparelho)
-let cache = [];                                 // registros vindos do servidor, do utilizador atual
-let sync = { estado: 'ok', erro: '' };          // ok | enviando | offline | erro
-let tela = 'home';
-let tab = 'inicio';
-let flow = null;
+let sessao = store.get('rec_sessao', null);   // { token, username, nome, loja, perfil, ferramentas }
+let fila = store.get('rec_fila', null);        // registros ainda não enviados: { ...registro, _tool, _dono }
+if (!fila) { fila = store.get('rec_af_fila', []).map(r => ({ ...r, _tool: 'apontamento_falta' })); store.set('rec_fila', fila); store.del('rec_af_fila'); }
+let cache = {};                                 // { ferramenta: [registros do servidor] }
+let sync = { estado: 'ok' };                    // ok | enviando | offline | erro
+let tela = 'home', tab = 'inicio', flow = null;
 let filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' };
-const salvarFila = () => store.set('rec_af_fila', fila);
-const cacheKey = () => 'rec_af_cache_' + sessao.username;
-const carregarCache = () => { cache = store.get(cacheKey(), []); };
-const minhaFila = () => fila.filter(r => r._dono === sessao.username);
-function registros() {
-  const ids = new Set(cache.map(r => r.id));
-  return [...cache, ...minhaFila().filter(r => !ids.has(r.id)).map(r => ({ ...r, _pendente: true }))];
+let ttFiltros = { processo: '', loja: '' };
+const salvarFila = () => store.set('rec_fila', fila);
+const cacheKey = k => `rec_cache_${k}_${sessao.username}`;
+const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); };
+const minhaFila = k => fila.filter(r => r._dono === sessao.username && (!k || r._tool === k));
+function registros(k) {
+  const c = cache[k] || [], ids = new Set(c.map(r => r.id));
+  return [...c, ...minhaFila(k).filter(r => !ids.has(r.id)).map(r => ({ ...r, _pendente: true }))];
 }
 
 // ── Utilitários ────────────────────────────────────────────────────────
@@ -257,11 +287,16 @@ const pad = n => String(n).padStart(2, '0');
 const fmtData = iso => { const d = new Date(iso); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const slug = s => norm(s).toLowerCase().replace(/ /g, '-');
-const isAdmin = () => !!sessao?.is_admin;
-const temAcesso = k => isAdmin() || (sessao?.ferramentas || []).includes(k);
+const perfil = () => sessao?.perfil || (sessao?.is_admin ? 'admin' : 'loja');
+const isAdmin = () => perfil() === 'admin';
+const isLoja = () => perfil() === 'loja';
+const temAcesso = k => !isLoja() || (sessao?.ferramentas || []).includes(k);
 const minhasFerramentas = () => Object.keys(FERRAMENTAS).filter(temAcesso);
+const podeExcluir = r => r._pendente || isAdmin() || isLoja() || r.meu;
 const porData = arr => [...arr].sort((a, b) => Date.parse(b.criado_em) - Date.parse(a.criado_em));
 const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
+const num1 = n => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+const fmtTempo = s => { s = Number(s) || 0; const m = Math.floor(s / 60), r = s - m * 60; return `${pad(m)}:${r < 10 ? '0' : ''}${r.toFixed(1)}`; };
 
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
@@ -271,12 +306,16 @@ const IC = {
   home: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>',
   list: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   chart:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  plus: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   lupa: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
+  relogio: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>',
+  users: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .8 3.2 2.6 3.6 5.2"/></svg>',
+  chave: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3M16.5 6.5l2.5 2.5M14 9l2 2"/></svg>',
 };
 
 // ── Sincronização ──────────────────────────────────────────────────────
 let sincronizando = false, ultimaAssinatura = '';
-const assinatura = () => `${cache.length}|${cache[0]?.id || ''}|${minhaFila().length}`;
+const assinatura = () => Object.keys(FERRAMENTAS).map(k => `${(cache[k] || []).length}.${cache[k]?.[0]?.id || ''}`).join('|') + '|' + minhaFila().length;
 function textoSync() {
   const n = minhaFila().length;
   if (sync.estado === 'enviando') return 'Sincronizando…';
@@ -285,31 +324,35 @@ function textoSync() {
   return n ? `${n} pendente${n > 1 ? 's' : ''}` : '✓ Sincronizado';
 }
 function atualizarSync() { const el = $('#sync'); if (el) el.textContent = textoSync(); }
+// Não redesenhar por baixo de quem está a preencher um formulário
+const emEdicao = () => flow || (tela === 'recolha_tempos' && tab === 'inicio') || $('#sheet').classList.contains('on');
 async function sincronizar() {
   if (!sessao || sincronizando) return;
   if (!navigator.onLine) { sync.estado = 'offline'; atualizarSync(); return; }
   sincronizando = true; sync.estado = 'enviando'; atualizarSync();
   try {
-    const pend = minhaFila();
-    if (pend.length) {
-      const res = await rpc('af_inserir', { p_token: sessao.token, p_registros: pend.map(({ _dono, _pendente, ...r }) => r) });
-      const ok = new Set(res.ok);
-      fila = fila.filter(r => !(r._dono === sessao.username && ok.has(r.id))); salvarFila();
-      if (res.erro.length) console.warn('Registros recusados pelo servidor:', res.erro);
+    for (const k of minhasFerramentas()) {
+      const p = FERRAMENTAS[k].rpc, pend = minhaFila(k);
+      if (pend.length) {
+        const res = await rpc(`${p}_inserir`, { p_token: sessao.token, p_registros: pend.map(({ _dono, _tool, _pendente, ...r }) => r) });
+        const ok = new Set(res.ok);
+        fila = fila.filter(r => !(r._dono === sessao.username && r._tool === k && ok.has(r.id))); salvarFila();
+        if (res.erro.length) console.warn('Registros recusados pelo servidor:', res.erro);
+      }
+      cache[k] = await rpc(`${p}_listar`, { p_token: sessao.token }); store.set(cacheKey(k), cache[k]);
     }
-    if (temAcesso('apontamento_falta')) { cache = await rpc('af_listar', { p_token: sessao.token }); store.set(cacheKey(), cache); }
-    sync.estado = minhaFila().length ? 'erro' : 'ok'; sync.erro = '';
+    sync.estado = minhaFila().length ? 'erro' : 'ok';
   } catch (e) {
     if (e.message === 'SESSAO_INVALIDA') { sincronizando = false; return expirou(); }
-    sync.estado = navigator.onLine ? 'erro' : 'offline'; sync.erro = e.message;
+    sync.estado = navigator.onLine ? 'erro' : 'offline';
   }
   sincronizando = false;
   const a = assinatura();
-  if (a !== ultimaAssinatura && !flow) { ultimaAssinatura = a; render(); } else atualizarSync();
+  if (a !== ultimaAssinatura && !emEdicao()) { ultimaAssinatura = a; render(); } else atualizarSync();
 }
 function expirou() {
-  sessao = null; store.del('rec_sessao'); render();
-  alert('Sua sessão expirou. Entre novamente. Os apontamentos não enviados continuam guardados neste aparelho.');
+  sessao = null; store.del('rec_sessao'); fecharSheet(); render();
+  alert('Sua sessão expirou. Entre novamente. Os registros não enviados continuam guardados neste aparelho.');
 }
 addEventListener('online', sincronizar);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sincronizar(); });
@@ -320,26 +363,34 @@ function render() {
   const app = $('#app');
   if (!sessao) return app.innerHTML = vLogin();
   if (flow) return app.innerHTML = vFlow();
-  const multi = isAdmin() || minhasFerramentas().length > 1;
-  if (tela === 'home' || !temAcesso(tela)) { tela = 'home'; return app.innerHTML = shell(sessao.nome, 'Recolha de Dados · Araujo', vHome(), null, false); }
-  const f = FERRAMENTAS[tela];
-  const tabs = isAdmin()
-    ? [['inicio', 'Painel', IC.chart], ['registros', 'Registros', IC.list]]
-    : [['inicio', 'Início', IC.home], ['registros', 'Histórico', IC.list]];
-  const sub = CLUSTER_DE[sessao.loja] || f.nome;
-  const corpo = tab === 'inicio' ? (isAdmin() ? vPainel() : vInicioLoja()) : vRegistros();
-  app.innerHTML = shell(multi ? f.nome : sessao.nome, multi ? (sessao.loja || sessao.nome) : sub, corpo, tabs, multi);
+  if (tela === 'config' && isAdmin()) return app.innerHTML = shell('Contas', 'Gestão de usuários', vConfig(), null, true);
+  if (tela === 'home' || tela === 'config' || !temAcesso(tela)) {
+    tela = telaInicial();
+    if (tela !== 'home') return render();
+    return app.innerHTML = shell(sessao.nome, `${PERFIS[perfil()]} · Recolha de Dados`, vHome(), null, false);
+  }
+  const f = FERRAMENTAS[tela], voltar = !isLoja();
+  let tabs, corpo;
+  if (tela === 'apontamento_falta') {
+    tabs = isLoja() ? [['inicio', 'Início', IC.home], ['registros', 'Histórico', IC.list]] : [['inicio', 'Painel', IC.chart], ['registros', 'Registros', IC.list]];
+    corpo = tab === 'inicio' ? (isLoja() ? vInicioLoja() : vPainel()) : vRegistros();
+  } else {
+    tabs = [['inicio', 'Registrar', IC.plus], ['registros', 'Registros', IC.list]];
+    corpo = tab === 'inicio' ? vTempos() : vTemposLista();
+  }
+  app.innerHTML = shell(voltar ? f.nome : sessao.nome, voltar ? sessao.nome : (CLUSTER_DE[sessao.loja] || f.nome), corpo, tabs, voltar);
+  if (tela === 'recolha_tempos' && tab === 'inicio') ttTick();
 }
 function shell(titulo, sub, corpo, tabs, voltar) {
-  return `<header class="top">${voltar ? `<button onclick="irTela('home')" aria-label="Ferramentas">‹</button>` : ''}
+  return `<header class="top">${voltar ? `<button onclick="irTela('home')" aria-label="Início">‹</button>` : ''}
       <div class="t"><h1>${esc(titulo)}</h1><small>${esc(sub)} · <span id="sync" onclick="sincronizar()">${textoSync()}</span></small></div>
       <button onclick="sair()">Sair</button></header>
     <main class="wrap">${corpo}<div class="ver">Recolha de Dados · v${VERSAO}</div></main>
     ${tabs ? `<nav class="tabs">${tabs.map(([k, l, i]) => `<button class="${tab === k ? 'on' : ''}" onclick="irTab('${k}')">${i}${l}</button>`).join('')}</nav>` : ''}`;
 }
 function irTab(k) { tab = k; render(); scrollTo(0, 0); }
-function irTela(k) { tela = k; tab = 'inicio'; render(); scrollTo(0, 0); }
-function telaInicial() { const fs = minhasFerramentas(); return !isAdmin() && fs.length === 1 ? fs[0] : 'home'; }
+function irTela(k) { tela = k; tab = 'inicio'; render(); scrollTo(0, 0); if (k === 'config') carregarContas(); }
+const telaInicial = () => isLoja() ? (minhasFerramentas()[0] || 'home') : 'home';
 
 // ── Login ──────────────────────────────────────────────────────────────
 function vLogin() {
@@ -365,32 +416,144 @@ async function entrar(e) {
     ultimaAssinatura = assinatura(); render(); sincronizar();
   } catch (err) {
     sessao = null; btn.disabled = false; btn.textContent = 'Entrar';
-    $('#lerr').textContent = err.message === 'LOGIN_INVALIDO' ? 'Usuário ou senha incorretos.'
-      : 'Sem conexão com o servidor. Verifique a internet e tente de novo.';
+    $('#lerr').textContent = msgErro(err);
   }
 }
 async function sair() {
   const n = minhaFila().length;
-  if (!confirm(n ? `Há ${plural(n, 'apontamento', 'apontamentos')} ainda não enviado${n > 1 ? 's' : ''}. Ficam guardados neste aparelho e são enviados no próximo login. Sair mesmo assim?` : 'Sair da conta?')) return;
-  const t = sessao.token; sessao = null; store.del('rec_sessao'); render();
+  if (!confirm(n ? `Há ${plural(n, 'registro', 'registros')} ainda não enviado${n > 1 ? 's' : ''}. Ficam guardados neste aparelho e são enviados no próximo login. Sair mesmo assim?` : 'Sair da conta?')) return;
+  const t = sessao.token; sessao = null; store.del('rec_sessao'); tt.t0 = null; render();
   rpc('app_logout', { p_token: t }).catch(() => {});
 }
 
-// ── Início: lista de ferramentas ───────────────────────────────────────
+// ── Início: ferramentas + conta (consultor e admin) ────────────────────
 function vHome() {
   const fs = minhasFerramentas();
-  return `<section class="card hero"><h2>Olá${sessao.loja ? '' : ', ' + esc(sessao.nome)}</h2>
-      <p style="margin:0">Escolha a ferramenta de recolha de dados.</p></section>
-    ${fs.map(k => { const f = FERRAMENTAS[k]; const n = k === 'apontamento_falta' ? registros().length : 0;
-      return `<button class="tool" onclick="irTela('${k}')"><span class="lg">${IC[f.icone]}</span>
-        <span class="tx"><b>${esc(f.nome)}</b><span>${esc(f.desc)}</span><small>${plural(n, 'registro', 'registros')}${isAdmin() ? ' · todas as lojas' : ''}</small></span><span class="go">›</span></button>`; }).join('')}
-    ${fs.length ? '' : '<div class="empty">Seu usuário ainda não tem ferramentas liberadas. Fale com a Kaizen.</div>'}`;
+  const cartao = (onclick, icone, nome, desc, extra = '') => `<button class="tool" onclick="${onclick}"><span class="lg">${IC[icone]}</span>
+    <span class="tx"><b>${esc(nome)}</b><span>${esc(desc)}</span>${extra}</span><span class="go">›</span></button>`;
+  return `<section class="card hero"><h2>Olá, ${esc(sessao.nome)}</h2><p style="margin:0">O que você vai registrar agora?</p></section>
+    ${fs.map(k => cartao(`irTela('${k}')`, FERRAMENTAS[k].icone, FERRAMENTAS[k].nome, FERRAMENTAS[k].desc,
+        `<small>${plural(registros(k).length, 'registro', 'registros')}${isLoja() ? '' : ' · todas as lojas'}</small>`)).join('')}
+    ${fs.length ? '' : '<div class="empty">Seu usuário ainda não tem ferramentas liberadas. Fale com a Kaizen.</div>'}
+    <h3 class="sec">Conta</h3>
+    ${isAdmin() ? cartao(`irTela('config')`, 'users', 'Gerir contas', 'Criar e excluir usuários, redefinir senhas.') : ''}
+    ${isLoja() ? '' : cartao('abrirMudarSenha()', 'chave', 'Mudar minha senha', `Usuário: ${sessao.username}`)}`;
+}
+
+// ── Minha conta: mudar senha ───────────────────────────────────────────
+function abrirMudarSenha() {
+  abrirSheet(`<h2 class="sh">Mudar minha senha</h2>
+    <form onsubmit="mudarSenha(event)">
+      <div class="fld"><label class="f">Senha atual</label><input class="in" type="password" id="s0" autocomplete="current-password"></div>
+      <div class="fld"><label class="f">Nova senha <span style="font-weight:400">(mínimo 6 caracteres)</span></label><input class="in" type="password" id="s1" autocomplete="new-password"></div>
+      <div class="fld"><label class="f">Repetir nova senha</label><input class="in" type="password" id="s2" autocomplete="new-password"></div>
+      <div class="err" id="serr"></div>
+      <button class="btn pri" id="bsenha">Salvar nova senha</button>
+      <button type="button" class="btn ghost" onclick="fecharSheet()">Cancelar</button></form>`);
+}
+async function mudarSenha(e) {
+  e.preventDefault();
+  const a = $('#s0').value, n1 = $('#s1').value, n2 = $('#s2').value, err = $('#serr');
+  if (n1.length < 6) return err.textContent = ERROS.SENHA_CURTA;
+  if (n1 !== n2) return err.textContent = 'As duas senhas novas não são iguais.';
+  $('#bsenha').disabled = true;
+  try { await rpc('app_mudar_senha', { p_token: sessao.token, p_atual: a, p_nova: n1 }); fecharSheet(); toast('Senha alterada ✓'); }
+  catch (x) { if (x.message === 'SESSAO_INVALIDA') return expirou(); err.textContent = msgErro(x); $('#bsenha').disabled = false; }
+}
+
+// ── Gestão de contas (admin) ───────────────────────────────────────────
+let contas = null, contasErro = '';
+async function carregarContas() {
+  try { contas = await rpc('adm_listar_utilizadores', { p_token: sessao.token }); contasErro = ''; }
+  catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); contasErro = msgErro(e); }
+  if (tela === 'config' && !$('#sheet').classList.contains('on')) render();
+}
+function vConfig() {
+  if (!contas) return contasErro ? `<div class="empty">${esc(contasErro)}<br><br><button class="btn sec sm" onclick="carregarContas()">Tentar de novo</button></div>` : '<div class="empty">Carregando contas…</div>';
+  const grupo = (p, abertos) => {
+    const l = contas.filter(c => c.perfil === p);
+    return `<details class="card grp" ${abertos ? 'open' : ''}><summary><span>${PERFIS_PL[p]} <span class="chip">${l.length}</span></span><span class="mut">▾</span></summary>
+      ${l.map(c => `<button class="urow" onclick="abrirConta('${esc(c.username)}')"><span><b>${esc(c.nome)}</b><small>${esc(c.username)}${c.username === sessao.username ? ' · você' : ''}</small></span><span class="go">›</span></button>`).join('') || '<p class="mut sm-t">Nenhuma conta.</p>'}</details>`;
+  };
+  return `<button class="btn pri" style="margin-bottom:14px" onclick="abrirNovaConta()">+ Nova conta</button>
+    ${grupo('admin', true)}${grupo('consultor', true)}${grupo('loja', false)}
+    <p class="mut sm-t" style="margin:6px 4px">Loja: só Apontamento de Falta, só a própria loja. Consultor: todas as ferramentas e lojas, exclui só o que registrou, não gere contas nem exporta. Admin: tudo.</p>`;
+}
+let nova = { perfil: 'consultor', loja: '', nome: '', usuario: '', senha: '' };
+function abrirNovaConta() { nova = { perfil: 'consultor', loja: '', nome: '', usuario: '', senha: '' }; vNovaConta(); }
+function vNovaConta() {
+  const semConta = LOJAS.filter(l => !contas?.some(c => c.username === norm(l[0])));
+  const seg = Object.entries(PERFIS).map(([k, l]) => `<button type="button" class="${nova.perfil === k ? 'on' : ''}" onclick="nova.perfil='${k}';vNovaConta()">${l}</button>`).join('');
+  const campos = nova.perfil === 'loja'
+    ? `<div class="fld"><label class="f">Loja</label><select class="in" onchange="nova.loja=this.value;vNovaConta()"><option value="">Selecione…</option>
+        ${semConta.map(l => `<option ${nova.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</select>
+        ${semConta.length ? '' : '<p class="mut sm-t">Todas as lojas já têm conta.</p>'}</div>
+       ${nova.loja ? `<div class="hint">Usuário e senha: <b>${esc(nova.loja)}</b> (sem diferença entre maiúsculas e acentos).</div>` : ''}`
+    : `<div class="fld"><label class="f">Nome</label><input class="in" id="nnome" value="${esc(nova.nome)}" placeholder="Ex.: João Barroso" oninput="nova.nome=this.value"></div>
+       <div class="fld"><label class="f">Usuário para login</label><input class="in" id="nuser" value="${esc(nova.usuario)}" placeholder="Ex.: joao" autocapitalize="none" oninput="nova.usuario=this.value"></div>
+       <div class="fld"><label class="f">Senha inicial <span style="font-weight:400">(mínimo 6)</span></label>
+         <div class="row"><input class="in" id="nsenha" value="${esc(nova.senha)}" oninput="nova.senha=this.value"><button type="button" class="btn sec sm" style="flex:0 0 auto;width:auto" onclick="nova.senha=gerarSenha();vNovaConta()">Gerar</button></div></div>`;
+  abrirSheet(`<h2 class="sh">Nova conta</h2>
+    <div class="seg">${seg}</div>
+    ${campos}<div class="err" id="nerr"></div>
+    <button class="btn pri" id="bcriar" onclick="criarConta()">Criar conta</button>
+    <button class="btn ghost" onclick="fecharSheet()">Cancelar</button>`);
+}
+function gerarSenha() { const a = 'abcdefghjkmnpqrstuvwxyz23456789'; let s = ''; for (let i = 0; i < 8; i++) s += a[Math.floor(Math.random() * a.length)]; return s.slice(0, 4) + '-' + s.slice(4); }
+async function criarConta() {
+  const loja = nova.perfil === 'loja';
+  const args = loja
+    ? { p_username: norm(nova.loja), p_nome: nova.loja, p_perfil: 'loja', p_loja: nova.loja, p_senha: norm(nova.loja), p_senha_normalizada: true }
+    : { p_username: norm(nova.usuario), p_nome: nova.nome.trim(), p_perfil: nova.perfil, p_loja: null, p_senha: nova.senha, p_senha_normalizada: false };
+  const err = $('#nerr');
+  if (!args.p_username || !args.p_nome) return err.textContent = ERROS.DADOS_EM_FALTA;
+  if (!loja && args.p_senha.length < 6) return err.textContent = ERROS.SENHA_CURTA;
+  $('#bcriar').disabled = true;
+  try {
+    await rpc('adm_criar_utilizador', { p_token: sessao.token, ...args });
+    abrirSheet(`<div class="res"><small>Conta criada</small><div class="c">${esc(args.p_nome)}</div></div>
+      <dl class="kv"><dt>Perfil</dt><dd>${PERFIS[args.p_perfil]}</dd><dt>Usuário</dt><dd>${esc(loja ? nova.loja : args.p_username)}</dd>
+      <dt>Senha</dt><dd>${esc(loja ? nova.loja : args.p_senha)}</dd></dl>
+      <p class="mut sm-t">Envie estes dados à pessoa. ${loja ? '' : 'Ela pode mudar a senha em "Mudar minha senha".'}</p>
+      <button class="btn pri" onclick="fecharSheet();carregarContas()">Concluir</button>`);
+  } catch (x) { if (x.message === 'SESSAO_INVALIDA') return expirou(); err.textContent = msgErro(x); $('#bcriar').disabled = false; }
+}
+function abrirConta(username) {
+  const c = contas.find(x => x.username === username); if (!c) return;
+  const eu = c.username === sessao.username;
+  abrirSheet(`<h2 class="sh">${esc(c.nome)}</h2>
+    <dl class="kv"><dt>Usuário</dt><dd>${esc(c.username)}</dd><dt>Perfil</dt><dd>${PERFIS[c.perfil]}</dd>
+      ${c.loja ? `<dt>Loja</dt><dd>${esc(c.loja)}</dd>` : ''}<dt>Criada em</dt><dd>${fmtData(c.criado_em)}</dd></dl>
+    ${c.perfil === 'loja'
+      ? `<button class="btn sec" onclick="redefinirSenha('${esc(c.username)}')">Repor senha (nome da loja)</button>`
+      : `<div class="fld"><label class="f">Nova senha para esta conta</label>
+           <div class="row"><input class="in" id="rsenha" placeholder="mínimo 6"><button type="button" class="btn sec sm" style="flex:0 0 auto;width:auto" onclick="$('#rsenha').value=gerarSenha()">Gerar</button></div></div>
+         <button class="btn sec" onclick="redefinirSenha('${esc(c.username)}')">Redefinir senha</button>`}
+    <div class="err" id="cerr"></div>
+    ${eu ? '<p class="mut sm-t">Esta é a sua conta: não pode ser excluída por você.</p>' : `<button class="btn danger" onclick="excluirConta('${esc(c.username)}')">Excluir conta</button>`}
+    <button class="btn ghost" onclick="fecharSheet()">Fechar</button>`);
+}
+async function redefinirSenha(username) {
+  const c = contas.find(x => x.username === username), loja = c.perfil === 'loja';
+  const senha = loja ? norm(c.loja) : $('#rsenha').value;
+  if (!loja && senha.length < 6) return $('#cerr').textContent = ERROS.SENHA_CURTA;
+  try {
+    await rpc('adm_redefinir_senha', { p_token: sessao.token, p_username: username, p_senha: senha, p_senha_normalizada: loja });
+    fecharSheet(); toast(loja ? 'Senha reposta: nome da loja' : `Nova senha: ${senha}`);
+    if (!loja) alert(`Senha de ${c.nome} redefinida.\n\nNova senha: ${senha}`);
+  } catch (x) { if (x.message === 'SESSAO_INVALIDA') return expirou(); $('#cerr').textContent = msgErro(x); }
+}
+async function excluirConta(username) {
+  const c = contas.find(x => x.username === username);
+  if (!confirm(`Excluir a conta de ${c.nome}? A pessoa deixa de conseguir entrar. Os registros que ela fez continuam na base de dados.`)) return;
+  try { await rpc('adm_excluir_utilizador', { p_token: sessao.token, p_username: username }); fecharSheet(); toast('Conta excluída'); carregarContas(); }
+  catch (x) { if (x.message === 'SESSAO_INVALIDA') return expirou(); $('#cerr').textContent = msgErro(x); }
 }
 
 // ── Apontamento de falta: início (loja) ────────────────────────────────
 function vInicioLoja() {
-  const recs = registros(), n = minhaFila().length;
-  const mes = new Date(); const doMes = recs.filter(r => { const d = new Date(r.criado_em); return d.getMonth() === mes.getMonth() && d.getFullYear() === mes.getFullYear(); });
+  const recs = registros('apontamento_falta'), n = minhaFila('apontamento_falta').length;
+  const hoje = new Date(); const doMes = recs.filter(r => { const d = new Date(r.criado_em); return d.getMonth() === hoje.getMonth() && d.getFullYear() === hoje.getFullYear(); });
   const top = contar(doMes.filter(r => r.tipo === 'causa')).slice(0, 3);
   return `
   <section class="card hero"><h2>Nova falta apontada?</h2>
@@ -401,25 +564,26 @@ function vInicioLoja() {
     <button class="btn sec" onclick="sincronizar()">Tentar enviar agora</button></section>` : ''}
   <section class="card"><h2>Este mês</h2>
     <div class="kpis" style="margin:0 0 ${top.length ? 10 : 0}px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><b>${doMes.length}</b><span>apontamentos</span></div></div>
-    ${top.length ? `<ul class="top3">${top.map(([c, k]) => `<li><span>${esc(c)}</span><b>${k}</b></li>`).join('')}</ul>` : ''}</section>`;
+    ${top.length ? `<ul class="top3">${top.map(([c, k]) => `<li><span>${esc(c)}</span><b>${k}</b></li>`).join('')}</ul>` : ''}
+    <p class="mut sm-t" style="margin:12px 0 0">Errou algum apontamento? Abra-o no Histórico e toque em "Excluir".</p></section>`;
 }
 
-// ── Registros / histórico ──────────────────────────────────────────────
+// ── Apontamento de falta: registros ────────────────────────────────────
 function vItem(r) {
   const imp = r.tipo !== 'causa';
   return `<button class="item ${imp ? 'imp' : ''}" onclick="detalhe('${esc(r.id)}')">
-    <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(isAdmin() ? r.loja : '')}</span></div>
+    <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(isLoja() ? '' : r.loja)}</span></div>
     <div class="l2">${esc(r.pacote)}${r.produto ? ' · ' + esc(r.produto) : ''}</div>
     <span class="chip ${imp ? 'imp' : ''}">${esc(imp ? '⚠ Inconsistência' : r.causa_raiz)}</span></button>`;
 }
 function vRegistros() {
-  const lista = porData(isAdmin() ? filtrar() : registros());
-  return `${isAdmin() ? vFiltros() : `<button class="btn pri" style="margin-bottom:14px" onclick="novo()">+ Novo apontamento</button>`}
-    <p class="mut sm-t" style="margin:4px 4px 10px">${plural(lista.length, 'registro', 'registros')}</p>
-    ${lista.length ? lista.map(vItem).join('') : `<div class="empty">Nenhum apontamento ${isAdmin() ? 'com estes filtros' : 'ainda'}.</div>`}`;
+  const lista = porData(isLoja() ? registros('apontamento_falta') : filtrar());
+  return `${isLoja() ? `<button class="btn pri" style="margin-bottom:14px" onclick="novo()">+ Novo apontamento</button>` : vFiltros()}
+    <p class="mut sm-t" style="margin:4px 4px 10px">${plural(lista.length, 'registro', 'registros')} · toque num registro para ver ou excluir</p>
+    ${lista.length ? lista.map(vItem).join('') : `<div class="empty">Nenhum apontamento ${isLoja() ? 'ainda' : 'com estes filtros'}.</div>`}`;
 }
 function detalhe(id) {
-  const r = registros().find(x => x.id === id); if (!r) return;
+  const r = registros('apontamento_falta').find(x => x.id === id); if (!r) return;
   const imp = r.tipo !== 'causa';
   abrirSheet(`
     <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Alerta de qualidade de dados' : 'Causa raiz'}</small><div class="c">${esc(r.causa_raiz)}</div></div>
@@ -429,24 +593,29 @@ function detalhe(id) {
       <dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
     <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Caminho percorrido</h2>
     <div class="trail" style="padding-top:0">${vTrilha(r.caminho || [])}</div>
-    <div style="margin-top:18px"><button class="btn sec" onclick="fecharSheet()">Fechar</button>
-    <button class="btn ghost sm" onclick="excluir('${esc(r.id)}')">Excluir apontamento</button></div>`);
+    <div style="margin-top:18px">
+    ${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('apontamento_falta','${esc(r.id)}')">Excluir apontamento</button>` : '<p class="mut sm-t">Só quem registrou (ou o admin) pode excluir.</p>'}
+    <button class="btn sec" onclick="fecharSheet()">Fechar</button></div>`);
 }
-async function excluir(id) {
-  if (!confirm('Excluir este apontamento? Ele sai também da base de dados da Kaizen.')) return;
-  if (cache.some(r => r.id === id)) {
-    try { await rpc('af_excluir', { p_token: sessao.token, p_id: id }); }
-    catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); alert('Não foi possível excluir agora. Verifique a internet e tente de novo.'); return; }
-    cache = cache.filter(r => r.id !== id); store.set(cacheKey(), cache);
+async function excluirRegistro(k, id) {
+  if (!confirm('Excluir este registro? Ele sai também da base de dados da Kaizen.')) return;
+  if ((cache[k] || []).some(r => r.id === id)) {
+    try { await rpc(`${FERRAMENTAS[k].rpc}_excluir`, { p_token: sessao.token, p_id: id }); }
+    catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); alert('Não foi possível excluir agora. ' + msgErro(e)); return; }
+    cache[k] = cache[k].filter(r => r.id !== id); store.set(cacheKey(k), cache[k]);
   }
   fila = fila.filter(r => r.id !== id); salvarFila();
-  fecharSheet(); render(); toast('Apontamento excluído');
+  fecharSheet(); ultimaAssinatura = assinatura(); render(); toast('Registro excluído');
 }
 function abrirSheet(html) { const s = $('#sheet'); s.innerHTML = `<div class="bg" onclick="fecharSheet()"></div><div class="pn"><div class="grip"></div>${html}</div>`; s.classList.add('on'); }
 function fecharSheet() { $('#sheet').classList.remove('on'); }
 const vTrilha = cam => `<ol>${cam.map(p => `<li>${esc(p.pergunta)} <b>${esc(p.resposta)}</b></li>`).join('')}</ol>`;
+function selLoja(valor, onchange) {
+  return `<select class="in" onchange="${onchange}"><option value="">Selecione…</option>
+    ${CLUSTERS.map(c => `<optgroup label="${esc(c)}">${LOJAS.filter(l => l[1] === c).map(l => `<option ${valor === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</optgroup>`).join('')}</select>`;
+}
 
-// ── Fluxo de mapeamento ────────────────────────────────────────────────
+// ── Apontamento de falta: fluxo de perguntas ───────────────────────────
 function novo() {
   flow = { etapa: 'dados', loja: sessao.loja || '', pacote: '', produto: '', path: [], atual: 'inicio', fim: null };
   history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0);
@@ -483,10 +652,9 @@ function vFlow() {
     <button onclick="cancelar()">✕</button></header>`;
   let corpo;
   if (flow.etapa === 'dados') {
-    const lojaFld = !sessao.loja
-      ? `<select class="in" onchange="flow.loja=this.value;dadosOk()"><option value="">Selecione…</option>
-          ${CLUSTERS.map(c => `<optgroup label="${esc(c)}">${LOJAS.filter(l => l[1] === c).map(l => `<option ${flow.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</optgroup>`).join('')}</select>`
-      : `<div class="in" style="background:var(--bg)">${esc(flow.loja)} <span class="mut sm-t">· ${esc(CLUSTER_DE[flow.loja])}</span></div>`;
+    const lojaFld = sessao.loja
+      ? `<div class="in" style="background:var(--bg)">${esc(flow.loja)} <span class="mut sm-t">· ${esc(CLUSTER_DE[flow.loja])}</span></div>`
+      : selLoja(flow.loja, 'flow.loja=this.value;dadosOk()');
     corpo = `<div class="step">Dados da falta</div><div class="q">Qual produto faltou?</div>
       <div class="fld"><label class="f">Loja</label>${lojaFld}</div>
       <div class="fld"><label class="f">Pacote</label><select class="in" onchange="flow.pacote=this.value;dadosOk()">
@@ -517,19 +685,131 @@ function vFlow() {
   return `<div class="flow">${head}<main class="wrap">${corpo}</main></div>`;
 }
 function dadosOk() { const b = $('#bcomecar'); if (b) b.disabled = !(flow.loja && flow.pacote); $('.top small').textContent = (flow.loja || 'Selecione a loja') + (flow.pacote ? ' · ' + flow.pacote : ''); }
+function guardarNaFila(k, r) {
+  fila.push({ ...r, versao: VERSAO, _tool: k, _dono: sessao.username });
+  if (!salvarFila()) { fila.pop(); alert('Não foi possível salvar neste aparelho (armazenamento bloqueado ou cheio).'); return false; }
+  return true;
+}
 function gravar() {
   const r = {
     id: uid(), criado_em: new Date().toISOString(), loja: flow.loja, cluster: CLUSTER_DE[flow.loja],
     pacote: flow.pacote, produto: flow.produto, usuario: sessao.nome,
     causa_raiz: flow.fim, tipo: flow.fim === IMPOSSIVEL ? 'inconsistencia' : 'causa',
-    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })), versao: VERSAO, _dono: sessao.username,
+    caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })),
   };
-  fila.push(r);
-  if (!salvarFila()) { fila.pop(); alert('Não foi possível salvar neste aparelho (armazenamento bloqueado ou cheio).'); return; }
+  if (!guardarNaFila('apontamento_falta', r)) return;
   tab = 'inicio'; sairFluxo(); toast('Apontamento salvo ✓'); sincronizar();
 }
 
-// ── CSV (exportação do admin / importação de arquivos da versão antiga) ──
+// ── Tomada de Tempos ───────────────────────────────────────────────────
+const ttUltimo = store.get('rec_tt_ultimo', {});
+let tt = { processo: ttUltimo.processo || '', loja: ttUltimo.loja || '', acum: 0, t0: null, unidades: '', obs: '' };
+const ttSegundos = () => tt.acum + (tt.t0 ? (Date.now() - tt.t0) / 1000 : 0);
+let ttTimer = null;
+function ttTick() {
+  clearInterval(ttTimer);
+  const pintar = () => {
+    const d = $('#ttd'); if (!d) { clearInterval(ttTimer); return; }
+    const s = ttSegundos(); d.textContent = fmtTempo(s);
+    if (tt.t0) { $('#ttm').value = Math.floor(s / 60); $('#tts').value = (s - Math.floor(s / 60) * 60).toFixed(1); }
+    ttValidar();
+  };
+  pintar(); if (tt.t0) ttTimer = setInterval(pintar, 100);
+}
+function ttIniciarParar() { if (tt.t0) { tt.acum = ttSegundos(); tt.t0 = null; } else tt.t0 = Date.now(); render(); }
+function ttZerar() { tt.acum = 0; tt.t0 = null; render(); }
+function ttManual() {
+  tt.t0 = null;
+  const m = parseFloat(($('#ttm').value || '0').replace(',', '.')) || 0, s = parseFloat(($('#tts').value || '0').replace(',', '.')) || 0;
+  tt.acum = Math.max(0, m * 60 + s); $('#ttd').textContent = fmtTempo(tt.acum); $('#ttb').textContent = '▶ Iniciar'; $('#ttb').classList.remove('run'); ttValidar();
+}
+function ttUn(delta) { const v = Math.max(0, (parseInt(tt.unidades) || 0) + delta); tt.unidades = v ? String(v) : ''; $('#ttu').value = tt.unidades; ttValidar(); }
+function ttValidar() {
+  const b = $('#ttsalvar'); if (!b) return;
+  const u = parseInt(tt.unidades) || 0, s = ttSegundos();
+  b.disabled = !(tt.processo && tt.loja && s > 0 && u > 0);
+  $('#ttpu').textContent = s > 0 && u > 0 ? `${num1(s / u)} s por unidade` : '';
+}
+function ttGuardarUltimo() { store.set('rec_tt_ultimo', { processo: tt.processo, loja: tt.loja }); }
+function vTempos() {
+  const s = ttSegundos(), m = Math.floor(s / 60);
+  const meus = porData(registros('recolha_tempos')).filter(r => r._pendente || r.meu).slice(0, 5);
+  return `<section class="card">
+      <div class="fld"><label class="f">Processo</label><select class="in" onchange="tt.processo=this.value;ttGuardarUltimo();ttValidar()">
+        <option value="">Selecione…</option>${PROCESSOS.map(p => `<option ${tt.processo === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></div>
+      <div class="fld" style="margin:0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
+    </section>
+    <section class="card crono">
+      <h2>Tempo</h2>
+      <div class="disp" id="ttd">${fmtTempo(s)}</div>
+      <div class="row"><button class="btn ${tt.t0 ? 'run' : 'pri'}" id="ttb" onclick="ttIniciarParar()">${tt.t0 ? '⏸ Parar' : (s > 0 ? '▶ Continuar' : '▶ Iniciar')}</button>
+        <button class="btn sec" style="flex:0 0 34%" onclick="ttZerar()">↺ Zerar</button></div>
+      <div class="manual"><span class="mut sm-t">ou digite:</span>
+        <label><input class="in" id="ttm" inputmode="numeric" value="${s > 0 ? m : ''}" placeholder="0" oninput="ttManual()"> min</label>
+        <label><input class="in" id="tts" inputmode="decimal" value="${s > 0 ? (s - m * 60).toFixed(1) : ''}" placeholder="0" oninput="ttManual()"> seg</label></div>
+    </section>
+    <section class="card">
+      <h2>Unidades</h2>
+      <div class="stepper"><button class="btn sec" onclick="ttUn(-1)">−</button>
+        <input class="in" id="ttu" inputmode="numeric" value="${esc(tt.unidades)}" placeholder="0" oninput="tt.unidades=this.value.replace(/\\D/g,'');this.value=tt.unidades;ttValidar()">
+        <button class="btn sec" onclick="ttUn(1)">+</button></div>
+      <div class="fld" style="margin:14px 0 0"><label class="f">Observação <span style="font-weight:400">(opcional)</span></label>
+        <input class="in" value="${esc(tt.obs)}" placeholder="Algo fora do normal?" oninput="tt.obs=this.value"></div>
+    </section>
+    <p class="pu" id="ttpu"></p>
+    <button class="btn pri" id="ttsalvar" onclick="ttSalvar()" disabled>Salvar tomada de tempo</button>
+    ${meus.length ? `<h3 class="sec">Seus últimos registros</h3>${meus.map(vTtItem).join('')}` : ''}`;
+}
+function ttSalvar() {
+  if (tt.t0) { tt.acum = ttSegundos(); tt.t0 = null; }
+  const loja = sessao.loja || tt.loja, seg = Math.round(tt.acum * 10) / 10, un = parseInt(tt.unidades) || 0;
+  if (!tt.processo || !loja || seg <= 0 || un <= 0) return;
+  const r = { id: uid(), criado_em: new Date().toISOString(), loja, cluster: CLUSTER_DE[loja], processo: tt.processo,
+              tempo_seg: seg, unidades: un, obs: tt.obs.trim(), usuario: sessao.nome };
+  if (!guardarNaFila('recolha_tempos', r)) return;
+  tt.acum = 0; tt.unidades = ''; tt.obs = '';
+  render(); scrollTo(0, 0); toast(`Salvo ✓ ${fmtTempo(seg)} · ${plural(un, 'unidade', 'unidades')}`); sincronizar();
+}
+function vTtItem(r) {
+  return `<button class="item" onclick="detalheTt('${esc(r.id)}')">
+    <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(r.loja)}</span></div>
+    <div class="l2">${esc(r.processo)}</div>
+    <span class="chip">${fmtTempo(r.tempo_seg)} · ${plural(r.unidades, 'un', 'un')} · ${num1(r.tempo_seg / r.unidades)} s/un</span></button>`;
+}
+function ttFiltrar() { return registros('recolha_tempos').filter(r => (!ttFiltros.processo || r.processo === ttFiltros.processo) && (!ttFiltros.loja || r.loja === ttFiltros.loja)); }
+function vTemposLista() {
+  const lista = porData(ttFiltrar());
+  const resumo = [...new Set(lista.map(r => r.processo))].sort().map(p => {
+    const l = lista.filter(r => r.processo === p), t = l.reduce((a, r) => a + Number(r.tempo_seg), 0), u = l.reduce((a, r) => a + Number(r.unidades), 0);
+    return `<li><span>${esc(p)}<br><span class="mut sm-t">${plural(l.length, 'tomada', 'tomadas')} · ${u} un</span></span><b>${num1(t / u)} s/un</b></li>`;
+  }).join('');
+  const sel = (k, opts, ph) => `<select class="in" onchange="ttFiltros.${k}=this.value;render()"><option value="">${ph}</option>${opts.map(o => `<option ${ttFiltros[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  return `<section class="card"><div class="g2">${sel('processo', PROCESSOS, 'Todos os processos')}${isLoja() ? '' : sel('loja', LOJAS.map(l => l[0]), 'Todas as lojas')}</div></section>
+    ${resumo ? `<section class="card"><h2>Média por processo</h2><ul class="top3">${resumo}</ul>
+      <p class="mut sm-t" style="margin:8px 0 0">Média ponderada: tempo total ÷ unidades totais.</p></section>` : ''}
+    ${isAdmin() && lista.length ? `<button class="btn sec" style="margin-bottom:12px" onclick="exportarTt()">Exportar para Excel (${lista.length})</button>` : ''}
+    <p class="mut sm-t" style="margin:4px 4px 10px">${plural(lista.length, 'registro', 'registros')} · toque num registro para ver ou excluir</p>
+    ${lista.length ? lista.map(vTtItem).join('') : '<div class="empty">Nenhuma tomada de tempo ainda.</div>'}`;
+}
+function detalheTt(id) {
+  const r = registros('recolha_tempos').find(x => x.id === id); if (!r) return;
+  abrirSheet(`<div class="res"><small>${esc(r.processo)}</small><div class="c">${fmtTempo(r.tempo_seg)} · ${plural(r.unidades, 'unidade', 'unidades')}</div></div>
+    <dl class="kv"><dt>Por unidade</dt><dd>${num1(r.tempo_seg / r.unidades)} s</dd><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd>
+      <dt>Loja</dt><dd>${esc(r.loja)}</dd><dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
+      ${r.obs ? `<dt>Observação</dt><dd>${esc(r.obs)}</dd>` : ''}<dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
+    ${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('recolha_tempos','${esc(r.id)}')">Excluir registro</button>` : '<p class="mut sm-t">Só quem registrou (ou o admin) pode excluir.</p>'}
+    <button class="btn sec" onclick="fecharSheet()">Fechar</button>`);
+}
+function exportarTt() {
+  if (!isAdmin()) return;
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', n2 = v => String(v).replace('.', ',');
+  const cols = ['id', 'data_hora', 'loja', 'cluster', 'processo', 'tempo_seg', 'tempo_mm_ss', 'unidades', 'seg_por_unidade', 'obs', 'usuario'];
+  const linhas = porData(ttFiltrar()).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.processo, n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades,
+    n2((r.tempo_seg / r.unidades).toFixed(2)), r.obs, r.usuario].map(q).join(';'));
+  baixar('﻿' + [cols.join(';'), ...linhas].join('\r\n'), `tomada-tempos_${hojeISO()}.csv`);
+}
+
+// ── CSV do apontamento de falta (exportação do admin / importação da versão antiga) ──
 const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pacote', 'produto', 'usuario', 'causa_raiz', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
 function toCSV(recs) {
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
@@ -560,7 +840,7 @@ function baixar(csv, nome) {
 }
 $('#imp').addEventListener('change', async e => {
   let novos = 0, repetidos = 0, invalidos = 0;
-  const ids = new Set(registros().map(r => r.id));
+  const ids = new Set(registros('apontamento_falta').map(r => r.id));
   for (const f of e.target.files) {
     let linhas; try { linhas = parseCSV(await f.text()); } catch { invalidos++; continue; }
     for (const l of linhas) {
@@ -568,7 +848,8 @@ $('#imp').addEventListener('change', async e => {
       if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso)) || !CLUSTER_DE[l.loja] || !l.pacote) { invalidos++; continue; }
       if (ids.has(l.id)) { repetidos++; continue; }
       fila.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: CLUSTER_DE[l.loja], pacote: l.pacote, produto: l.produto,
-        usuario: l.usuario, causa_raiz: l.causa_raiz, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam, versao: VERSAO, _dono: sessao.username });
+        usuario: l.usuario, causa_raiz: l.causa_raiz, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam,
+        versao: VERSAO, _tool: 'apontamento_falta', _dono: sessao.username });
       ids.add(l.id); novos++;
     }
   }
@@ -578,11 +859,11 @@ $('#imp').addEventListener('change', async e => {
   sincronizar();
 });
 
-// ── Painel admin ───────────────────────────────────────────────────────
+// ── Painel do apontamento de falta (consultor e admin) ─────────────────
 function filtrar() {
   const { cluster, loja, pacote, causa, de, ate } = filtros;
   const t0 = de ? new Date(de + 'T00:00:00').getTime() : -Infinity, t1 = ate ? new Date(ate + 'T23:59:59.999').getTime() : Infinity;
-  return registros().filter(r => (!cluster || r.cluster === cluster) && (!loja || r.loja === loja) && (!pacote || r.pacote === pacote)
+  return registros('apontamento_falta').filter(r => (!cluster || r.cluster === cluster) && (!loja || r.loja === loja) && (!pacote || r.pacote === pacote)
     && (!causa || r.causa_raiz === causa) && (t => t >= t0 && t <= t1)(new Date(r.criado_em).getTime()));
 }
 function contar(recs) {
@@ -609,7 +890,7 @@ function vFiltros() {
     </div></details>`;
 }
 function vPainel() {
-  const todos = registros(), f = filtrar(), causas = f.filter(r => r.tipo === 'causa'), inc = f.length - causas.length;
+  const todos = registros('apontamento_falta'), f = filtrar(), causas = f.filter(r => r.tipo === 'causa'), inc = f.length - causas.length;
   const par = contar(causas), max = par[0]?.[1] || 1; let acum = 0;
   return `
   <section class="card hero"><h2>Base de dados central</h2><div class="big">${plural(todos.length, 'apontamento', 'apontamentos')}</div>
@@ -626,16 +907,16 @@ function vPainel() {
       <div class="v">${n} · ${(n / causas.length * 100).toFixed(0)}% · acumulado ${(acum / causas.length * 100).toFixed(0)}%</div></div>`; }).join('')
       : '<div class="empty" style="padding:16px">Sem dados para mostrar.</div>'}
     ${inc ? `<p class="sm-t" style="color:var(--warn);margin:4px 0 0">⚠ ${plural(inc, 'inconsistência', 'inconsistências')} fora do Pareto.</p>` : ''}</section>
-  <section class="card"><h2>Exportar para Excel</h2>
+  ${isAdmin() ? `<section class="card"><h2>Exportar para Excel</h2>
     <button class="btn pri" onclick="exportar(true)" ${f.length ? '' : 'disabled'}>Exportar filtrado (${f.length})</button>
     <button class="btn sec" onclick="exportar(false)" ${todos.length ? '' : 'disabled'}>Exportar tudo (${todos.length})</button></section>
   <section class="card"><h2>Arquivos da versão antiga</h2>
     <p class="mut sm-t" style="margin:0 0 10px">CSV recebidos por WhatsApp antes da base de dados central. São enviados para a base (sem duplicar).</p>
-    <button class="btn sec sm" onclick="$('#imp').click()">Importar arquivos CSV</button></section>`;
+    <button class="btn sec sm" onclick="$('#imp').click()">Importar arquivos CSV</button></section>` : ''}`;
 }
 function exportar(soFiltrado) {
   if (!isAdmin()) return;
-  baixar(toCSV(soFiltrado ? filtrar() : registros()), nomeArq(soFiltrado ? 'filtrado' : 'todos'));
+  baixar(toCSV(soFiltrado ? filtrar() : registros('apontamento_falta')), nomeArq(soFiltrado ? 'filtrado' : 'todos'));
 }
 
 // ── Arranque ───────────────────────────────────────────────────────────
@@ -643,7 +924,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) naviga
 if (sessao) {
   carregarCache(); tela = telaInicial(); ultimaAssinatura = assinatura(); render();
   rpc('app_eu', { p_token: sessao.token })
-    .then(p => { sessao = { ...sessao, ...p }; store.set('rec_sessao', sessao); tela = temAcesso(tela) ? tela : telaInicial(); render(); sincronizar(); })
+    .then(p => { sessao = { ...sessao, ...p }; store.set('rec_sessao', sessao); if (!temAcesso(tela) && tela !== 'config') tela = telaInicial(); if (isLoja()) tela = telaInicial(); render(); sincronizar(); })
     .catch(e => { if (e.message === 'SESSAO_INVALIDA') expirou(); else sincronizar(); });
 } else render();
 </script>
