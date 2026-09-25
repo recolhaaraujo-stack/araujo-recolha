@@ -148,7 +148,7 @@ details.grp[open] summary{margin-bottom:8px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '3.0';
+const VERSAO = '3.1';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -174,20 +174,29 @@ const PACOTES = ['ALIMENTOS','CONVENIENCIA','CUIDADO ADULTO','DERMOCOSMETICOS','
 const C = {
   CORPO:  'Falha no Corpo e Alma',
   PROF:   'Produtos diferentes em profundidade',
-  PADRAO: 'Vendedor não encontrou o produto que estava no local correto segundo o padrão de clique e retire',
+  PADRAO: 'Vendedor não encontrou o produto no local correto',
   REPOS:  'Erro de reposição',
   PONTAS: 'Vendedor não tinha conhecimento das pontas',
   DESC:   'Descumprimento do padrão de clique e retire',
-  SUBEST: 'Organização de subestoque mal feita',
+  SUBEST: 'Falha na Organização de Subestoque',
   MARF:   'Falha na procura do marfinite, por não usar relatório de recebimento',
-  DIVTOT: 'Divergência total de receção',
-  SIST:   'Erro de stock no sistema não identificado',
+  DIVTOT: 'Divergência total de recepção',
+  SIST:   'Erro de estoque no sistema não identificado',
   FURTO:  'Furto',
-  FPARC:  'Furto ou divergência parcial de receção',
+  FPARC:  'Furto ou divergência parcial de recepção',
 };
 const CAUSAS = Object.values(C);
 const IMPOSSIVEL = 'Impossível — inconsistência de resposta';
 const VALIDAS = new Set([...CAUSAS, IMPOSSIVEL]);
+// Textos antigos das causas (até v3.0) → texto atual, para registros guardados/importados antes da mudança
+const CAUSA_ANTIGA = {
+  'Vendedor não encontrou o produto que estava no local correto segundo o padrão de clique e retire': C.PADRAO,
+  'Organização de subestoque mal feita': C.SUBEST,
+  'Divergência total de receção': C.DIVTOT,
+  'Erro de stock no sistema não identificado': C.SIST,
+  'Furto ou divergência parcial de receção': C.FPARC,
+};
+const causaAtual = c => CAUSA_ANTIGA[c] || c;
 
 // ── Árvore de decisão ──────────────────────────────────────────────────
 const N = {};
@@ -207,15 +216,17 @@ function ponta(p, noLocal, ateLocal, hint) {
 
 N.inicio   = { q: 'O produto foi encontrado na loja?', opts: SN(go('pn'), go('vendas')) };
 // Ramo SIM
-N.pn       = { q: 'Estava na ponta natural (a do planograma)?', opts: SN(go('pn_frente'), go('outra_pn')) };
+N.pn       = { q: 'Estava exposto no módulo correto segundo o planograma?', opts: SN(go('pn_frente'), go('outra_pn')) };
 frente('pn', 'Estava na frente correta, conforme o planograma?');
-N.outra_pn = { q: 'Estava em outra ponta natural (diferente da do planograma)?', opts: SN(fim(C.REPOS), go('extra')) };
+N.outra_pn = { q: 'Estava exposto numa ponta natural de outros produtos?', opts: SN(fim(C.REPOS), go('extra')) };
 N.extra    = { q: 'Estava em uma ponta extra?', opts: SN(go('paga'), go('subest')) };
-N.paga     = { q: 'Essa ponta extra era paga?', opts: SN(go('paga_sabia'), go('conf')) };
+N.paga     = { q: 'A ponta extra era paga?', opts: SN(go('paga_sabia'), go('saldao')) };
 ponta('paga', 'na ponta paga', 'a ponta paga');
+N.saldao   = { q: 'A ponta era de Saldão?', opts: SN(go('saldao_sabia'), go('conf')) };
+ponta('saldao', 'na ponta de Saldão', 'a ponta de Saldão');
 N.conf     = { q: 'Estava no confinamento?', opts: SN(go('conf_sabia'), go('ger_sabia')) };
 ponta('conf', 'no confinamento', 'o confinamento');
-ponta('ger', 'na ponta de gerente', 'a ponta de gerente', 'Não era ponta paga nem confinamento, então é uma ponta de gerente.');
+ponta('ger', 'na ponta extra de gerente', 'a ponta extra de gerente', 'Não era ponta paga, de Saldão nem confinamento, então é uma ponta extra de gerente.');
 N.subest   = { q: 'Estava no subestoque?', opts: SN(go('sub_foi'), go('marf')) };
 N.sub_foi  = { q: 'O vendedor foi até o subestoque?', opts: SN(go('sub_local'), fim(C.DESC)) };
 N.sub_local= { q: 'No subestoque, o produto estava no local do pacote correto?', opts: SN(fim(C.PADRAO), fim(C.SUBEST)) };
@@ -263,7 +274,8 @@ const store = {
 };
 let sessao = store.get('rec_sessao', null);   // { token, username, nome, loja, perfil, ferramentas }
 let fila = store.get('rec_fila', null);        // registros ainda não enviados: { ...registro, _tool, _dono }
-if (!fila) { fila = store.get('rec_af_fila', []).map(r => ({ ...r, _tool: 'apontamento_falta' })); store.set('rec_fila', fila); store.del('rec_af_fila'); }
+if (!fila) { fila = store.get('rec_af_fila', []).map(r => ({ ...r, _tool: 'apontamento_falta' })); store.del('rec_af_fila'); }
+fila = fila.map(r => r._tool === 'apontamento_falta' ? { ...r, causa_raiz: causaAtual(r.causa_raiz) } : r); store.set('rec_fila', fila);
 let cache = {};                                 // { ferramenta: [registros do servidor] }
 let sync = { estado: 'ok' };                    // ok | enviando | offline | erro
 let tela = 'home', tab = 'inicio', flow = null;
@@ -845,6 +857,7 @@ $('#imp').addEventListener('change', async e => {
     let linhas; try { linhas = parseCSV(await f.text()); } catch { invalidos++; continue; }
     for (const l of linhas) {
       let cam; try { cam = JSON.parse(l.caminho_json || '[]'); } catch { cam = []; }
+      l.causa_raiz = causaAtual(l.causa_raiz);
       if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso)) || !CLUSTER_DE[l.loja] || !l.pacote) { invalidos++; continue; }
       if (ids.has(l.id)) { repetidos++; continue; }
       fila.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: CLUSTER_DE[l.loja], pacote: l.pacote, produto: l.produto,
