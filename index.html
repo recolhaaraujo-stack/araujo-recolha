@@ -147,6 +147,11 @@ details.grp[open] summary{margin-bottom:8px}
 textarea.in{resize:vertical;font-family:inherit;line-height:1.4}
 label.chk{display:flex;align-items:center;gap:10px;margin:0 0 14px;font-weight:600}
 label.chk input{width:20px;height:20px}
+.passos{list-style:none;margin:8px 0 0;padding:0}
+.passos li{display:flex;gap:14px;align-items:flex-start;background:#fff;border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.passos .pic{flex:none;width:44px;height:44px;border-radius:12px;background:var(--soft);display:grid;place-items:center;font-size:22px}
+.passos b{display:block;font-size:16px;margin-bottom:2px}.passos p{margin:0;color:var(--mut);font-size:14px;line-height:1.45}
+.obr{font-weight:600;font-size:11px;color:#b42318;background:#fdecec;border-radius:999px;padding:2px 8px;margin-left:6px;text-transform:uppercase;letter-spacing:.03em}
 </style>
 </head>
 <body>
@@ -156,7 +161,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '3.3';
+const VERSAO = '3.4';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -180,30 +185,31 @@ const PACOTES = ['ALIMENTOS','CONVENIENCIA','CUIDADO ADULTO','DERMOCOSMETICOS','
 
 // ── Causas raiz: valores controlados (alimentam o Pareto — não editar texto) ─
 const C = {
-  CORPO:  'Falha no Corpo e Alma',
-  PROF:   'Produtos diferentes em profundidade',
-  PADRAO: 'Vendedor não encontrou o produto no local correto',
-  REPOS:  'Erro de reposição',
-  PONTAS: 'Vendedor não tinha conhecimento das pontas',
-  DESC:   'Descumprimento do padrão de clique e retire',
-  SUBEST: 'Falha na Organização de Subestoque',
-  MARF:   'Falha na procura do marfinite, por não usar relatório de recebimento',
-  OUTRO:  'Produto foi encontrado em outro local fora do padrão clique e retire',
-  DIVTOT: 'Divergência total de recepção',
-  SIST:   'Erro de estoque no sistema não identificado',
-  FURTO:  'Furto',
-  FPARC:  'Furto ou divergência parcial de recepção',
+  CORPO:    'Falha no Corpo e Alma',
+  PROF:     'Produtos diferentes em profundidade',
+  PADRAO:   'Vendedor não encontrou o produto no local correto',
+  REPOS:    'Erro de reposição',
+  PONTAS:   'Vendedor não tinha conhecimento das pontas',
+  DESC:     'Descumprimento do padrão de clique e retire',
+  SUBEST:   'Falha na Organização de Subestoque',
+  MARF:     'Falha na procura do marfinite, por não usar relatório de recebimento',
+  OUTRO:    'Produto foi encontrado em outro local fora do padrão clique e retire',
+  VENC:     'Produto de vencimento curto',
+  COMVENDA: 'Produto com venda nos últimos 7 dias',
+  SEMVENDA: 'Produto sem venda nos últimos 7 dias',
 };
 const CAUSAS = Object.values(C);
+// Causas que já não saem da árvore, mas existem em registros antigos
+const LEGADO = ['Divergência total de recepção', 'Erro de estoque no sistema não identificado', 'Furto', 'Furto ou divergência parcial de recepção'];
 const IMPOSSIVEL = 'Impossível — inconsistência de resposta';
-const VALIDAS = new Set([...CAUSAS, IMPOSSIVEL]);
-// Textos antigos das causas (até v3.0) → texto atual, para registros guardados/importados antes da mudança
+const VALIDAS = new Set([...CAUSAS, ...LEGADO, IMPOSSIVEL]);
+// Textos antigos das causas → texto atual, para registros guardados/importados antes da mudança
 const CAUSA_ANTIGA = {
   'Vendedor não encontrou o produto que estava no local correto segundo o padrão de clique e retire': C.PADRAO,
   'Organização de subestoque mal feita': C.SUBEST,
-  'Divergência total de receção': C.DIVTOT,
-  'Erro de stock no sistema não identificado': C.SIST,
-  'Furto ou divergência parcial de receção': C.FPARC,
+  'Divergência total de receção': 'Divergência total de recepção',
+  'Erro de stock no sistema não identificado': 'Erro de estoque no sistema não identificado',
+  'Furto ou divergência parcial de receção': 'Furto ou divergência parcial de recepção',
   'Produto foi encontrado num outro local que não pertence ao padrão do clique e retire': C.OUTRO,
 };
 const causaAtual = c => CAUSA_ANTIGA[c] || c;
@@ -213,42 +219,73 @@ const N = {};
 const go = id => ({ next: id });
 const fim = causa => ({ causa });
 const SN = (sim, nao) => [['Sim', sim], ['Não', nao]];
-
+const H = {
+  frente:  'Verifique se o produto estava na frente que tem a etiqueta de preço correspondente a ele.',
+  visivel: 'Verifique se o produto estava puxado para a frente da prateleira, e não escondido atrás de outros produtos na mesma frente.',
+  foi:     'Pergunte ao vendedor se ele foi procurar o produto neste local antes de apontar a falta.',
+};
 function frente(p, pergunta) {
-  N[p + '_frente']  = { q: pergunta, opts: SN(go(p + '_visivel'), fim(C.CORPO)) };
-  N[p + '_visivel'] = { q: 'Estava visível, sem outro produto diferente na frente dele?', opts: SN(fim(C.PADRAO), fim(C.PROF)) };
+  N[p + '_frente']  = { q: pergunta, hint: H.frente, opts: SN(go(p + '_visivel'), fim(C.CORPO)) };
+  N[p + '_visivel'] = { q: 'Estava visível, sem outro produto diferente na frente dele?', hint: H.visivel, opts: SN(fim(C.PADRAO), fim(C.PROF)) };
 }
-function ponta(p, noLocal, ateLocal, hint, frenteLocal = noLocal[0].toUpperCase() + noLocal.slice(1)) {
-  N[p + '_sabia'] = { q: `O vendedor sabia que o produto estava ${noLocal}?`, hint, opts: SN(go(p + '_foi'), fim(C.PONTAS)) };
-  N[p + '_foi']   = { q: `O vendedor foi até ${ateLocal}?`, opts: SN(go(p + '_frente'), fim(C.DESC)) };
-  frente(p, `${frenteLocal}, o produto estava na frente correta?`);
+// Bloco das pontas extra: o vendedor sabia → foi até lá → frente correta → visível
+function ponta(p, t) {
+  N[p + '_sabia'] = { q: t.sabia, hint: t.hintSabia, opts: SN(go(p + '_foi'), fim(C.PONTAS)) };
+  N[p + '_foi']   = { q: t.foi, hint: H.foi, opts: SN(go(p + '_frente'), fim(C.DESC)) };
+  frente(p, t.frente);
 }
 
-N.inicio   = { q: 'O produto foi encontrado na loja?', opts: SN(go('pn'), go('vendas')) };
+N.inicio   = { q: 'O produto apontado como falta foi encontrado na loja?',
+               hint: 'Se, depois do apontamento, o produto foi encontrado em qualquer lugar da loja, marque SIM.',
+               opts: SN(go('pn'), go('vendas')) };
 // Ramo SIM
-N.pn       = { q: 'Estava exposto no módulo correto segundo o planograma?', opts: SN(go('pn_frente'), go('outra_pn')) };
+N.pn       = { q: 'Estava exposto no módulo correto, segundo o planograma?',
+               hint: 'O módulo correto é o lugar onde o produto deve ficar exposto, de acordo com o planograma da loja.',
+               opts: SN(go('pn_frente'), go('outra_pn')) };
 frente('pn', 'Estava na frente correta, conforme o planograma?');
-N.outra_pn = { q: 'Estava exposto numa ponta natural de outros produtos?', opts: SN(fim(C.REPOS), go('extra')) };
-N.extra    = { q: 'Estava em uma ponta extra?', opts: SN(go('paga'), go('subest')) };
-N.paga     = { q: 'A ponta extra era paga?', opts: SN(go('paga_sabia'), go('saldao')) };
-ponta('paga', 'na ponta paga', 'a ponta paga');
-N.saldao   = { q: 'A ponta era de Saldão?', opts: SN(go('saldao_sabia'), go('conf')) };
-ponta('saldao', 'na ponta de Saldão', 'a ponta de Saldão');
+N.outra_pn = { q: 'Estava exposto em uma ponta natural de outros produtos?',
+               hint: 'Verifique se o produto estava em outro local da loja, que não é o seu módulo correto nem uma ponta extra onde ele poderia estar. Por exemplo: no módulo de outros produtos.',
+               opts: SN(fim(C.REPOS), go('extra')) };
+N.extra    = { q: 'Estava em uma ponta extra?',
+               hint: 'Ponta extra é um espaço de exposição além do módulo do planograma: ponta paga, ponta de Saldão, confinamento, ponta de gerente, ilhas, etc.',
+               opts: SN(go('paga'), go('subest')) };
+N.paga     = { q: 'A ponta extra era paga?',
+               hint: 'Ponta paga é a ponta extra contratada por um fornecedor para expor os seus produtos.',
+               opts: SN(go('paga_sabia'), go('saldao')) };
+ponta('paga', { sabia: 'O vendedor sabia que o produto estava na ponta paga?',
+                hintSabia: 'Pergunte ao vendedor se ele sabia que o produto também estava exposto na ponta paga.',
+                foi: 'O vendedor foi até a ponta paga?', frente: 'Na ponta paga, o produto estava na frente correta?' });
+N.saldao   = { q: 'A ponta extra era de Saldão?',
+               hint: 'A ponta de Saldão reúne produtos com vencimento próximo.',
+               opts: SN(fim(C.VENC), go('conf')) };
 N.conf     = { q: 'Estava no confinamento?', opts: SN(go('conf_sabia'), go('outras_sabia')) };
-ponta('conf', 'no confinamento', 'o confinamento');
-ponta('outras', 'nessa ponta', 'essa ponta', 'Não era ponta paga, de Saldão nem confinamento: é uma das Outras Pontas (Ponta de Gerente, Ilhas, etc.).', 'Nessa ponta');
-N.subest   = { q: 'Estava no subestoque?', opts: SN(go('sub_foi'), go('marf')) };
-N.sub_foi  = { q: 'O vendedor foi até o subestoque?', opts: SN(go('sub_local'), fim(C.DESC)) };
-N.sub_local= { q: 'No subestoque, o produto estava no local do pacote correto?', opts: SN(fim(C.PADRAO), fim(C.SUBEST)) };
-N.marf     = { q: 'Estava no marfinite?', opts: SN(go('marf_foi'), go('outro_local')) };
-N.outro_local = { q: 'Em que local estava o produto?', texto: true, placeholder: 'Ex.: balcão, caixa, depósito, carrinho…', causa: C.OUTRO };
-N.marf_foi = { q: 'O vendedor procurou no marfinite?', opts: SN(go('marf_rel'), fim(C.DESC)) };
-N.marf_rel = { q: 'Ele foi ao local indicado no relatório de recebimento?', opts: SN(fim(C.PADRAO), fim(C.MARF)) };
+ponta('conf', { sabia: 'O vendedor sabia que o produto estava no confinamento?',
+                hintSabia: 'Pergunte ao vendedor se ele sabia que o produto estava no confinamento.',
+                foi: 'O vendedor foi até o confinamento?', frente: 'No confinamento, o produto estava na frente correta?' });
+ponta('outras', { sabia: 'O produto estava em OUTRA PONTA extra. O vendedor sabia que o produto estava nessa outra ponta?',
+                  hintSabia: 'Não era ponta paga, de Saldão nem confinamento: é outra ponta extra da loja (ponta de gerente, ilha, etc.). Pergunte ao vendedor se ele sabia que o produto estava exposto ali.',
+                  foi: 'O vendedor foi até essa outra ponta?', frente: 'Nessa outra ponta, o produto estava na frente correta?' });
+N.subest   = { q: 'Estava no subestoque?',
+               hint: 'O subestoque é o estoque de apoio da loja, fora da área de vendas.',
+               opts: SN(go('sub_foi'), go('marf')) };
+N.sub_foi  = { q: 'O vendedor foi até o subestoque?', hint: H.foi, opts: SN(go('sub_local'), fim(C.DESC)) };
+N.sub_local= { q: 'No subestoque, o produto estava no local do pacote correto?',
+               hint: 'Verifique se o produto estava guardado no espaço do pacote a que pertence.',
+               opts: SN(fim(C.PADRAO), fim(C.SUBEST)) };
+N.marf     = { q: 'Estava no marfinite?',
+               hint: 'Marfinite são as caixas plásticas com a mercadoria recebida que ainda não foi guardada.',
+               opts: SN(go('marf_foi'), go('outro_local')) };
+N.outro_local = { q: 'Em que local estava o produto?', texto: true,
+                  hint: 'Descreva onde o produto foi encontrado, para podermos analisar.',
+                  placeholder: 'Ex.: balcão, caixa, depósito, carrinho…', causa: C.OUTRO };
+N.marf_foi = { q: 'O vendedor procurou no marfinite?', hint: H.foi, opts: SN(go('marf_rel'), fim(C.DESC)) };
+N.marf_rel = { q: 'O vendedor foi ao local indicado no relatório de recebimento?',
+               hint: 'O relatório de recebimento mostra onde ficou cada produto recebido.',
+               opts: SN(fim(C.PADRAO), fim(C.MARF)) };
 // Ramo NÃO
-N.vendas   = { q: 'Desde o último recebimento, quantas das unidades recebidas foram vendidas?',
-               opts: [['Nenhuma (0)', fim(C.DIVTOT)], ['Todas', fim(C.SIST)], ['Parte delas', go('inv')]] };
-N.inv      = { q: 'Foi feita conferência no Inventário Rotativo desde o recebimento?',
-               opts: [['Sim, e o estoque batia', fim(C.FURTO)], ['Não / sem dado', fim(C.FPARC)]] };
+N.vendas   = { q: 'O produto teve venda nos últimos 7 dias?',
+               hint: 'Consulte no sistema se houve alguma venda deste produto nos últimos 7 dias.',
+               opts: SN(fim(C.COMVENDA), fim(C.SEMVENDA)) };
 
 // ── Base de dados central (Supabase) ───────────────────────────────────
 const SUPA_URL = 'https://zayzrqeceajniqshvmew.supabase.co';
@@ -391,7 +428,7 @@ function render() {
   if (tela === 'home' || tela === 'config' || !temAcesso(tela)) {
     tela = telaInicial();
     if (tela !== 'home') return render();
-    return app.innerHTML = shell(sessao.nome, `${PERFIS[perfil()]} · Recolha de Dados`, vHome(), null, false);
+    return app.innerHTML = shell(sessao.nome, `${PERFIS[perfil()]} · Drogaria Araujo`, vHome(), null, false);
   }
   const f = FERRAMENTAS[tela], voltar = !isLoja();
   let tabs, corpo;
@@ -409,7 +446,7 @@ function shell(titulo, sub, corpo, tabs, voltar) {
   return `<header class="top">${voltar ? `<button onclick="irTela('home')" aria-label="Início">‹</button>` : ''}
       <div class="t"><h1>${esc(titulo)}</h1><small>${esc(sub)} · <span id="sync" onclick="sincronizar()">${textoSync()}</span></small></div>
       <button onclick="sair()">Sair</button></header>
-    <main class="wrap">${corpo}<div class="ver">Recolha de Dados · v${VERSAO}</div></main>
+    <main class="wrap">${corpo}<div class="ver">Drogaria Araujo · Recolha de Dados · v${VERSAO}</div></main>
     ${tabs ? `<nav class="tabs">${tabs.map(([k, l, i]) => `<button class="${tab === k ? 'on' : ''}" onclick="irTab('${k}')">${i}${l}</button>`).join('')}</nav>` : ''}`;
 }
 function irTab(k) { tab = k; render(); scrollTo(0, 0); }
@@ -419,7 +456,7 @@ const telaInicial = () => isLoja() ? (minhasFerramentas()[0] || 'home') : 'home'
 // ── Login ──────────────────────────────────────────────────────────────
 function vLogin() {
   return `<div class="login"><div class="box">
-    <div class="brand"><div class="lg">${IC.lupa}</div><div><b>Recolha de Dados</b><span class="mut">Projeto Araujo · Kaizen Institute</span></div></div>
+    <div class="brand"><div class="lg">${IC.lupa}</div><div><b>Recolha de Dados</b><span class="mut">Drogaria Araujo</span></div></div>
     <form onsubmit="entrar(event)" autocomplete="off">
       <div class="fld"><label class="f" for="u">Usuário</label>
         <input class="in" id="u" list="lojas-dl" autocapitalize="characters" placeholder="Usuário"></div>
@@ -458,7 +495,7 @@ function vHome() {
   return `<section class="card hero"><h2>Olá, ${esc(sessao.nome)}</h2><p style="margin:0">O que você vai registrar agora?</p></section>
     ${fs.map(k => cartao(`irTela('${k}')`, FERRAMENTAS[k].icone, FERRAMENTAS[k].nome, FERRAMENTAS[k].desc,
         `<small>${plural(registros(k).length, 'registro', 'registros')}${isLoja() ? '' : ' · todas as lojas'}</small>`)).join('')}
-    ${fs.length ? '' : '<div class="empty">Seu usuário ainda não tem ferramentas liberadas. Fale com a Kaizen.</div>'}
+    ${fs.length ? '' : '<div class="empty">Seu usuário ainda não tem ferramentas liberadas. Fale com o administrador.</div>'}
     <h3 class="sec">Conta</h3>
     ${isAdmin() ? cartao(`irTela('config')`, 'users', 'Gerir contas', 'Criar e excluir usuários, redefinir senhas.') : ''}
     ${isLoja() ? '' : cartao('abrirMudarSenha()', 'chave', 'Mudar minha senha', `Usuário: ${sessao.username}`)}`;
@@ -584,7 +621,7 @@ function vInicioLoja() {
     <p>Responda às perguntas, uma de cada vez, até chegar à causa raiz.</p>
     <button class="btn light" onclick="novo()">+ Novo apontamento</button></section>
   ${n ? `<section class="card"><h2>Aguardando envio</h2>
-    <p style="margin:0 0 12px"><b>${plural(n, 'apontamento', 'apontamentos')}</b> ainda não chegou à Kaizen${sync.estado === 'offline' ? ' (sem internet)' : ''}. Será enviado automaticamente quando houver conexão.</p>
+    <p style="margin:0 0 12px"><b>${plural(n, 'apontamento', 'apontamentos')}</b> ainda não foi enviado${sync.estado === 'offline' ? ' (sem internet)' : ''}. Será enviado automaticamente quando houver conexão.</p>
     <button class="btn sec" onclick="sincronizar()">Tentar enviar agora</button></section>` : ''}
   <section class="card"><h2>Este mês</h2>
     <div class="kpis" style="margin:0 0 ${top.length ? 10 : 0}px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><b>${doMes.length}</b><span>apontamentos</span></div></div>
@@ -597,7 +634,7 @@ function vItem(r) {
   const imp = r.tipo !== 'causa';
   return `<button class="item ${imp ? 'imp' : ''}" onclick="detalhe('${esc(r.id)}')">
     <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(isLoja() ? '' : r.loja)}</span></div>
-    <div class="l2">${esc(r.pacote)}${r.produto ? ' · ' + esc(r.produto) : ''}</div>
+    <div class="l2">${esc(r.pacote)}${r.pedido ? ' · Pedido ' + esc(r.pedido) : r.produto ? ' · ' + esc(r.produto) : ''}</div>
     <span class="chip ${imp ? 'imp' : ''}">${esc(imp ? '⚠ Inconsistência' : r.causa_raiz)}</span></button>`;
 }
 function vRegistros() {
@@ -612,7 +649,7 @@ function detalhe(id) {
   abrirSheet(`
     <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Alerta de qualidade de dados' : 'Causa raiz'}</small><div class="c">${esc(r.causa_raiz)}</div></div>
     <dl class="kv"><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd><dt>Loja</dt><dd>${esc(r.loja)}</dd>
-      <dt>Cluster</dt><dd>${esc(r.cluster)}</dd><dt>Pacote</dt><dd>${esc(r.pacote)}</dd>
+      <dt>Cluster</dt><dd>${esc(r.cluster)}</dd>${r.pedido ? `<dt>Pedido</dt><dd>${esc(r.pedido)}</dd>` : ''}<dt>Pacote</dt><dd>${esc(r.pacote)}</dd>
       ${r.produto ? `<dt>Produto</dt><dd>${esc(r.produto)}</dd>` : ''}${r.local_encontrado ? `<dt>Local encontrado</dt><dd>${esc(r.local_encontrado)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
       <dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
     <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Caminho percorrido</h2>
@@ -622,7 +659,7 @@ function detalhe(id) {
     <button class="btn sec" onclick="fecharSheet()">Fechar</button></div>`);
 }
 async function excluirRegistro(k, id) {
-  if (!confirm('Excluir este registro? Ele sai também da base de dados da Kaizen.')) return;
+  if (!confirm('Excluir este registro? Ele sai também da base de dados central.')) return;
   if ((cache[k] || []).some(r => r.id === id)) {
     try { await rpc(`${FERRAMENTAS[k].rpc}_excluir`, { p_token: sessao.token, p_id: id }); }
     catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); alert('Não foi possível excluir agora. ' + msgErro(e)); return; }
@@ -641,11 +678,12 @@ function selLoja(valor, onchange) {
 
 // ── Apontamento de falta: fluxo de perguntas ───────────────────────────
 function novo() {
-  flow = { etapa: 'dados', loja: sessao.loja || '', pacote: '', produto: '', path: [], atual: 'inicio', fim: null };
+  flow = { etapa: 'padrao', loja: sessao.loja || '', pedido: '', pacote: '', path: [], atual: 'inicio', fim: null };
   history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0);
 }
 function avancar() { history.pushState({ af: 1 }, ''); render(); scrollTo(0, 0); }
-function comecar() { if (!flow.loja || !flow.pacote) return; flow.etapa = 'arvore'; flow.atual = 'inicio'; avancar(); }
+const dadosCompletos = () => !!(flow.loja && flow.pedido.trim() && flow.pacote);
+function comecar() { if (!dadosCompletos()) return; flow.etapa = 'arvore'; flow.atual = 'inicio'; avancar(); }
 function responder(i) {
   const no = N[flow.atual], [label, alvo] = no.opts[i];
   flow.path.push({ no: flow.atual, pergunta: no.q, resposta: label });
@@ -660,13 +698,14 @@ function responderTexto() {
 // Um passo atrás (botão "voltar" do navegador/Android ou botão Voltar)
 function recuar() {
   if (!flow) return;
-  if (flow.etapa === 'dados') { flow = null; }
+  if (flow.etapa === 'padrao') { flow = null; }
+  else if (flow.etapa === 'dados') flow.etapa = 'padrao';
   else if (flow.path.length) { const u = flow.path.pop(); flow.atual = u.no; flow.fim = null; if (N[u.no]?.texto) { flow.rascunho = u.resposta; flow.local = null; } }
   else flow.etapa = 'dados';
   render(); scrollTo(0, 0);
 }
 function sairFluxo() {
-  const passos = flow.etapa === 'dados' ? 1 : 2 + flow.path.length;
+  const passos = flow.etapa === 'padrao' ? 1 : flow.etapa === 'dados' ? 2 : 3 + flow.path.length;
   flow = null; history.go(-passos); render(); scrollTo(0, 0);
 }
 function cancelar() {
@@ -675,22 +714,36 @@ function cancelar() {
 }
 addEventListener('popstate', () => { if ($('#sheet').classList.contains('on')) fecharSheet(); if (flow) recuar(); });
 
+const PASSOS = [
+  ['⏱️', 'Faça logo', 'Faça o mapeamento assim que souber que o produto foi apontado como falta: de preferência no mesmo dia, ou antes do recebimento do dia seguinte.'],
+  ['🧾', 'Tenha o número do pedido', 'O número do pedido do clique e retire é obrigatório para registrar o apontamento.'],
+  ['🔎', 'Procure bem o produto', 'Procure em todos os lugares onde ele pode estar: módulo do planograma, pontas naturais, pontas extras (paga, Saldão, confinamento, gerente, ilhas), subestoque e marfinite.'],
+  ['🗣️', 'Se encontrar, converse com o vendedor', 'Pergunte se ele sabia onde o produto estava e se procurou em todos os locais previstos no padrão de Separação de Clique e Retire.'],
+  ['✅', 'Responda às perguntas', 'Uma pergunta de cada vez. Leia a instrução abaixo de cada pergunta antes de responder.'],
+];
+function vPadrao() {
+  return `<div class="step">Antes de começar</div><div class="q">Como fazer o mapeamento</div>
+    <ol class="passos">${PASSOS.map(([ic, t, d]) => `<li><span class="pic">${ic}</span><div><b>${esc(t)}</b><p>${esc(d)}</p></div></li>`).join('')}</ol>
+    <div style="margin-top:auto;padding-top:12px"><button class="btn pri" onclick="iniciarMapeamento()">Iniciar mapeamento</button></div>`;
+}
+function iniciarMapeamento() { flow.etapa = 'dados'; avancar(); }
 function vFlow() {
   const head = `<header class="top"><button onclick="history.back()">‹ Voltar</button>
     <div class="t" style="text-align:center"><h1>Novo apontamento</h1><small>${esc(flow.loja || 'Selecione a loja')}${flow.pacote ? ' · ' + esc(flow.pacote) : ''}</small></div>
     <button onclick="cancelar()">✕</button></header>`;
   let corpo;
-  if (flow.etapa === 'dados') {
+  if (flow.etapa === 'padrao') corpo = vPadrao();
+  else if (flow.etapa === 'dados') {
     const lojaFld = sessao.loja
       ? `<div class="in" style="background:var(--bg)">${esc(flow.loja)} <span class="mut sm-t">· ${esc(CLUSTER_DE[flow.loja])}</span></div>`
       : selLoja(flow.loja, 'flow.loja=this.value;dadosOk()');
-    corpo = `<div class="step">Dados da falta</div><div class="q">Qual produto faltou?</div>
+    corpo = `<div class="step">Dados do apontamento</div><div class="q">De que pedido é a falta?</div>
       <div class="fld"><label class="f">Loja</label>${lojaFld}</div>
-      <div class="fld"><label class="f">Pacote</label><select class="in" onchange="flow.pacote=this.value;dadosOk()">
+      <div class="fld"><label class="f">Nº do pedido <span class="obr">obrigatório</span></label>
+        <input class="in" id="fpedido" placeholder="Número do pedido do clique e retire" value="${esc(flow.pedido)}" oninput="flow.pedido=this.value;dadosOk()"></div>
+      <div class="fld"><label class="f">Pacote do produto em falta</label><select class="in" onchange="flow.pacote=this.value;dadosOk()">
         <option value="">Selecione…</option>${PACOTES.map(p => `<option ${flow.pacote === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></div>
-      <div class="fld"><label class="f">Produto <span style="font-weight:400">(opcional)</span></label>
-        <input class="in" placeholder="Código ou nome do produto" value="${esc(flow.produto)}" oninput="flow.produto=this.value.trim()"></div>
-      <div style="margin-top:auto;padding-top:12px"><button class="btn pri" id="bcomecar" onclick="comecar()" ${flow.loja && flow.pacote ? '' : 'disabled'}>Começar perguntas</button></div>`;
+      <div style="margin-top:auto;padding-top:12px"><button class="btn pri" id="bcomecar" onclick="comecar()" ${dadosCompletos() ? '' : 'disabled'}>Começar perguntas</button></div>`;
   } else if (!flow.fim) {
     const no = N[flow.atual];
     corpo = `<div class="step">Pergunta ${flow.path.length + 1}</div>
@@ -706,7 +759,7 @@ function vFlow() {
       <div class="res ${imp ? 'imp' : ''}"><small>${imp ? 'Respostas inconsistentes' : 'Causa raiz'}</small>
         <div class="c">${esc(imp ? 'Impossível' : flow.fim)}</div>
         ${imp ? '<p>O produto foi encontrado na loja, mas não estava em nenhum dos locais possíveis. Revise as respostas. Se estiverem corretas, salve como inconsistência (não entra no Pareto).</p>' : ''}</div>
-      <div class="meta"><span class="chip">${esc(flow.loja)}</span><span class="chip">${esc(flow.pacote)}</span>${flow.produto ? `<span class="chip">${esc(flow.produto)}</span>` : ''}${flow.local ? `<span class="chip">Local: ${esc(flow.local)}</span>` : ''}</div>
+      <div class="meta"><span class="chip">${esc(flow.loja)}</span><span class="chip">Pedido ${esc(flow.pedido.trim())}</span><span class="chip">${esc(flow.pacote)}</span>${flow.local ? `<span class="chip">Local: ${esc(flow.local)}</span>` : ''}</div>
       <div class="trail" style="margin-top:0;padding-top:0"><span class="mut sm-t">Caminho percorrido</span>${vTrilha(flow.path)}</div>
       <div style="margin-top:auto;padding-top:20px">
         ${imp ? `<button class="btn pri" onclick="history.back()">Revisar respostas</button>
@@ -716,7 +769,7 @@ function vFlow() {
   }
   return `<div class="flow">${head}<main class="wrap">${corpo}</main></div>`;
 }
-function dadosOk() { const b = $('#bcomecar'); if (b) b.disabled = !(flow.loja && flow.pacote); $('.top small').textContent = (flow.loja || 'Selecione a loja') + (flow.pacote ? ' · ' + flow.pacote : ''); }
+function dadosOk() { const b = $('#bcomecar'); if (b) b.disabled = !dadosCompletos(); $('.top small').textContent = (flow.loja || 'Selecione a loja') + (flow.pacote ? ' · ' + flow.pacote : ''); }
 function guardarNaFila(k, r) {
   fila.push({ ...r, versao: VERSAO, _tool: k, _dono: sessao.username });
   if (!salvarFila()) { fila.pop(); alert('Não foi possível salvar neste aparelho (armazenamento bloqueado ou cheio).'); return false; }
@@ -725,7 +778,7 @@ function guardarNaFila(k, r) {
 function gravar() {
   const r = {
     id: uid(), criado_em: new Date().toISOString(), loja: flow.loja, cluster: CLUSTER_DE[flow.loja],
-    pacote: flow.pacote, produto: flow.produto, usuario: sessao.nome,
+    pedido: flow.pedido.trim(), pacote: flow.pacote, usuario: sessao.nome,
     causa_raiz: flow.fim, tipo: flow.fim === IMPOSSIVEL ? 'inconsistencia' : 'causa',
     caminho: flow.path.map(p => ({ no: p.no, pergunta: p.pergunta, resposta: p.resposta })), local_encontrado: flow.local || null,
   };
@@ -937,10 +990,10 @@ async function excluirProcesso(id) {
 }
 
 // ── CSV do apontamento de falta (exportação do admin / importação da versão antiga) ──
-const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pacote', 'produto', 'usuario', 'causa_raiz', 'local_encontrado', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
+const COLS = ['id', 'data_hora', 'loja', 'cluster', 'pedido', 'pacote', 'produto', 'usuario', 'causa_raiz', 'local_encontrado', 'tipo', 'caminho', 'criado_em_iso', 'caminho_json'];
 function toCSV(recs) {
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const linhas = porData(recs).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.pacote, r.produto, r.usuario, r.causa_raiz, r.local_encontrado, r.tipo,
+  const linhas = porData(recs).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.pedido, r.pacote, r.produto, r.usuario, r.causa_raiz, r.local_encontrado, r.tipo,
     (r.caminho || []).map(p => `${p.pergunta} → ${p.resposta}`).join(' | '), r.criado_em, JSON.stringify(r.caminho || [])].map(q).join(';'));
   return '﻿' + [COLS.join(';'), ...linhas].join('\r\n');
 }
@@ -975,7 +1028,7 @@ $('#imp').addEventListener('change', async e => {
       l.causa_raiz = causaAtual(l.causa_raiz);
       if (!l.id || !l.criado_em_iso || !VALIDAS.has(l.causa_raiz) || isNaN(Date.parse(l.criado_em_iso)) || !CLUSTER_DE[l.loja] || !l.pacote) { invalidos++; continue; }
       if (ids.has(l.id)) { repetidos++; continue; }
-      fila.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: CLUSTER_DE[l.loja], pacote: l.pacote, produto: l.produto,
+      fila.push({ id: l.id, criado_em: l.criado_em_iso, loja: l.loja, cluster: CLUSTER_DE[l.loja], pedido: l.pedido || null, pacote: l.pacote, produto: l.produto,
         usuario: l.usuario, causa_raiz: l.causa_raiz, local_encontrado: l.local_encontrado || null, tipo: l.causa_raiz === IMPOSSIVEL ? 'inconsistencia' : 'causa', caminho: cam,
         versao: VERSAO, _tool: 'apontamento_falta', _dono: sessao.username });
       ids.add(l.id); novos++;
@@ -1001,6 +1054,10 @@ function contar(recs) {
 let filtrosAbertos = false;
 function setF(k, v) { filtros[k] = v; if (k === 'cluster' && filtros.loja && CLUSTER_DE[filtros.loja] !== v && v) filtros.loja = ''; filtrosAbertos = true; render(); }
 function limparF() { filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' }; render(); }
+function causasFiltro() {
+  const pres = new Set(registros('apontamento_falta').map(r => r.causa_raiz));
+  return [...CAUSAS, ...[...LEGADO, IMPOSSIVEL].filter(c => pres.has(c))];
+}
 function vFiltros() {
   const n = Object.values(filtros).filter(Boolean).length;
   const sel = (k, opts, ph) => `<select class="in" onchange="setF('${k}',this.value)"><option value="">${ph}</option>${opts.map(o => `<option ${filtros[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
@@ -1011,7 +1068,7 @@ function vFiltros() {
       <div class="full">${sel('cluster', CLUSTERS, 'Todos os clusters')}</div>
       <div class="full">${sel('loja', lojas, 'Todas as lojas')}</div>
       <div class="full">${sel('pacote', PACOTES, 'Todos os pacotes')}</div>
-      <div class="full">${sel('causa', [...CAUSAS, IMPOSSIVEL], 'Todas as causas')}</div>
+      <div class="full">${sel('causa', causasFiltro(), 'Todas as causas')}</div>
       <div><label class="f sm-t">De</label><input class="in" type="date" value="${filtros.de}" onchange="setF('de',this.value)"></div>
       <div><label class="f sm-t">Até</label><input class="in" type="date" value="${filtros.ate}" onchange="setF('ate',this.value)"></div>
       ${n ? `<div class="full"><button class="btn ghost sm" onclick="limparF()">Limpar filtros</button></div>` : ''}
