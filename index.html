@@ -178,6 +178,7 @@ label.chk input{width:20px;height:20px}
 .kdest .kpi{background:#fff7f5;box-shadow:inset 0 0 0 1.5px #f5c2bd}.kdest .kpi b{font-size:28px}
 .kpi small{display:block;font-size:12px;color:var(--mut);margin-top:4px}
 .drh .cod{flex:1;min-width:0;padding:8px 10px;font-size:15px}
+.partilha{background:var(--soft);color:var(--kb);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;margin:0 0 12px}
 </style>
 </head>
 <body>
@@ -187,7 +188,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.2';
+const VERSAO = '4.3';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -428,6 +429,7 @@ async function sincronizar() {
         if (res.erro.length) console.warn('Registros recusados pelo servidor:', res.erro);
       }
       if (k === 'recolha_tempos') await carregarProcessos();
+      if (k === 'divergencia_recebimento') drAbertas = await rpc('dr_sessoes_abertas', { p_token: sessao.token });
       cache[k] = await rpc(`${p}_listar`, { p_token: sessao.token }); store.set(cacheKey(k), cache[k]);
     }
     sync.estado = minhaFila().length ? 'erro' : 'ok';
@@ -482,7 +484,7 @@ function shell(titulo, sub, corpo, tabs, voltar) {
     ${tabs ? `<nav class="tabs">${tabs.map(([k, l, i]) => `<button class="${tab === k ? 'on' : ''}" onclick="irTab('${k}')">${i}${l}</button>`).join('')}</nav>` : ''}`;
 }
 function irTab(k) { tab = k; render(); scrollTo(0, 0); }
-function irTela(k) { tela = k; tab = 'inicio'; render(); scrollTo(0, 0); if (k === 'config') carregarContas(); }
+function irTela(k) { tela = k; tab = 'inicio'; render(); scrollTo(0, 0); if (k === 'config') carregarContas(); if (k === 'divergencia_recebimento') drCarregarAbertas(); }
 const telaInicial = () => isLoja() ? (minhasFerramentas()[0] || 'home') : 'home';
 
 // ── Login ──────────────────────────────────────────────────────────────
@@ -1038,16 +1040,15 @@ let drFlow = null;                       // { etapa, d } — d é o rascunho do 
 let drFiltros = { cluster: '', loja: '', de: '', ate: '' };
 const drKey = () => `rec_dr_rascunho_${sessao.username}`;
 const drRascunho = () => store.get(drKey(), null);
-const drGuardar = () => { if (drFlow && DR_ETAPAS.indexOf(drFlow.etapa) >= 2) store.set(drKey(), { ...drFlow.d, etapa: drFlow.etapa }); };
 const numOuNull = v => { const s = String(v ?? '').replace(/\D/g, ''); return s === '' ? null : parseInt(s, 10); };
 const horaAgora = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const pct = (a, b) => b ? a / b : 0;
 const fmtPct = x => `${(x * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 const vNum = v => v == null ? '' : v;
 const drTipoVazio = () => ({ esperada: null, real: null, caixas: [] });
-const caixaVazia = () => ({ codigo: '', skus: null, itens: null, div: [] });
+const caixaVazia = (id = uid(), ordem = Date.now()) => ({ id, ordem, codigo: '', skus: null, itens: null, div: [] });
 function drNovo() {
-  return { id: uid(), criado_em: new Date().toISOString(), loja: sessao.loja || store.get('rec_dr_loja', ''), n_marfinites: null, n_volumosos: null,
+  return { id: uid(), criado_por: sessao.username, criado_em: new Date().toISOString(), loja: sessao.loja || store.get('rec_dr_loja', ''), n_marfinites: null, n_volumosos: null,
            hora_inicio: horaAgora(), hora_fim: '', obs: '', volumosos: [],
            marf: { termolabil: drTipoVazio(), comum: drTipoVazio(), controlado: drTipoVazio() } };
 }
@@ -1118,17 +1119,33 @@ function drProblemas(d) {
 }
 
 // ── Fluxo (ecrã inteiro) ──
+// drFlow = { etapa, d, remoto, pend: {chave: nº}, vers: {chave: data do servidor}, cursor, participantes, st }
+//   remoto: o recebimento já existe na base de dados (partilhado)
+//   pend:   partes alteradas neste aparelho ainda por gravar
+const volVazio = (id = uid(), ordem = Date.now()) => ({ id, ordem, pacote: '', esperada: null, real: null });
+const linhaVazia = () => ({ pacote: '', esperada: null, real: null });
+function drMigrar(d) {   // rascunhos anteriores à partilha não tinham ids
+  d.volumosos.forEach((v, i) => { v.id ||= `v-${i + 1}`; v.ordem ??= i + 1; });
+  for (const [t] of DR_TIPOS) d.marf[t].caixas.forEach((c, i) => { c.id ||= `${t}-${i + 1}`; c.ordem ??= i + 1; if (!('itens' in c)) c.itens = null; if (!('codigo' in c)) c.codigo = ''; });
+  d.criado_por ||= sessao.username;
+  return d;
+}
 function drAbrir(continuar) {
   const r = continuar ? drRascunho() : null;
-  if (r) for (const [t] of DR_TIPOS) r.marf[t].caixas.forEach(c => { if (!('itens' in c)) c.itens = null; });   // rascunhos da v4.0
-  drFlow = r ? { etapa: DR_ETAPAS.includes(r.etapa) ? r.etapa : 'volumosos', d: r } : { etapa: 'padrao', d: drNovo() };
+  if (r) {
+    const s = r._s || {}; delete r._s;
+    drFlow = { etapa: DR_ETAPAS.includes(r.etapa) ? r.etapa : 'volumosos', d: drMigrar(r), remoto: !!s.remoto, pend: s.pend || {}, vers: s.vers || {}, cursor: s.cursor || null, participantes: [], st: '' };
+    if (!s.remoto && !s.pend) drTudoPendente();   // rascunho antigo: enviar tudo
+    for (const [t] of DR_TIPOS) drGarantirCaixas(t);
+  } else drFlow = { etapa: 'padrao', d: drNovo(), remoto: false, pend: {}, vers: {}, cursor: null, participantes: [], st: '' };
   history.pushState({ dr: 1 }, ''); render(); scrollTo(0, 0);
+  drPush(); drPull().catch(() => {});
 }
 function drSair(porVoltar) {
   drGuardar(); drFlow = null; if (!porVoltar) history.back(); render(); scrollTo(0, 0);
 }
 function drIr(etapa) {
-  if (etapa === 'fim' && !drFlow.d.hora_fim) drFlow.d.hora_fim = horaAgora();
+  if (etapa === 'fim' && !drFlow.d.hora_fim) { drFlow.d.hora_fim = horaAgora(); drMarcar('cab'); }
   drFlow.etapa = etapa; drGuardar(); render(); scrollTo(0, 0);
 }
 function drPasso(delta, porVoltar) {
@@ -1139,30 +1156,198 @@ function drPasso(delta, porVoltar) {
 // Botão "voltar" do telemóvel: recua uma etapa e volta a armar o histórico
 addEventListener('popstate', () => { if (!drFlow || flow) return; drPasso(-1, true); if (drFlow) history.pushState({ dr: 1 }, ''); });
 function drRender() { const y = scrollY; render(); scrollTo(0, y); }
+// Não redesenhar enquanto a pessoa está a escrever num campo: fica para quando sair do campo
+const drAEscrever = () => document.activeElement?.matches?.('#app input, #app textarea, #app select');
+function drRenderSeguro() { if (drAEscrever()) drFlow.renderPendente = true; else drRender(); }
+document.addEventListener('focusout', () => setTimeout(() => { if (drFlow?.renderPendente && !drAEscrever()) { drFlow.renderPendente = false; drRender(); } }, 60));
+
+// Que parte do recebimento um campo altera
+function drChaveDe(c) {
+  const d = drFlow.d;
+  if (c[0] === 'volumosos') return 'vol:' + d.volumosos[c[1]].id;
+  if (c[0] === 'marf' && c[2] === 'real') return 'real:' + c[1];
+  if (c[0] === 'marf' && c[2] === 'caixas') return 'cx:' + d.marf[c[1]].caixas[c[3]].id;
+  return 'cab';
+}
+let drRev = 0;
+function drMarcar(chave) { drFlow.pend[chave] = ++drRev; drGuardar(); drAgendarPush(); }
+function drTudoPendente() {
+  const d = drFlow.d;
+  ['cab', ...DR_TIPOS.map(([t]) => 'real:' + t), ...d.volumosos.map(v => 'vol:' + v.id),
+   ...DR_TIPOS.flatMap(([t]) => d.marf[t].caixas.map(c => 'cx:' + c.id))].forEach(k => { drFlow.pend[k] = ++drRev; });
+}
 function drSet(caminho, valor, redesenhar) {
   let o = drFlow.d; for (let i = 0; i < caminho.length - 1; i++) o = o[caminho[i]];
-  o[caminho[caminho.length - 1]] = valor; drGuardar(); if (redesenhar) drRender();
+  o[caminho[caminho.length - 1]] = valor; drMarcar(drChaveDe(caminho)); if (redesenhar) drRender();
 }
-const linhaVazia = () => ({ pacote: '', esperada: null, real: null });
-function drAddVol() { drFlow.d.volumosos.push(linhaVazia()); drGuardar(); drRender(); }
-function drRemVol(i) { if (!confirm(`Remover o Volumoso ${i + 1}?`)) return; drFlow.d.volumosos.splice(i, 1); drGuardar(); drRender(); }
+// Conteúdo de cada parte, para gravar na base de dados
+function drItemDados(chave) {
+  const d = drFlow.d;
+  if (chave === 'cab') return { loja: d.loja, n_volumosos: d.n_volumosos, hora_inicio: d.hora_inicio, hora_fim: d.hora_fim, obs: d.obs,
+                                criado_em: d.criado_em, criado_por: d.criado_por, esperadas: Object.fromEntries(DR_TIPOS.map(([t]) => [t, d.marf[t].esperada])) };
+  if (chave.startsWith('real:')) return { real: d.marf[chave.slice(5)].real };
+  if (chave.startsWith('vol:')) { const v = d.volumosos.find(x => x.id === chave.slice(4)); return v ? { ...v } : { apagado: true }; }
+  for (const [t] of DR_TIPOS) { const c = d.marf[t].caixas.find(x => x.id === chave.slice(3)); if (c) return { ...c, tipo: t }; }
+  return { apagado: true };
+}
+// Os marfinites 1..N (N = quantidade real) existem em todos os aparelhos, mesmo antes de alguém os preencher
+function drGarantirCaixas(t) {
+  const f = drFlow, m = f.d.marf[t], n = m.real || 0, vazia = c => !c.codigo && c.skus == null && c.itens == null && !c.div.length;
+  for (let k = 1; k <= n; k++) if (!m.caixas.some(c => c.id === `${t}-${k}`)) m.caixas.push(caixaVazia(`${t}-${k}`, k));
+  m.caixas = m.caixas.filter(c => { const k = +String(c.id).split('-').pop(); return !(c.id === `${t}-${k}` && k > n && vazia(c) && !f.vers['cx:' + c.id] && !f.pend['cx:' + c.id]); });
+  m.caixas.sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+}
+// Aplicar uma parte recebida de outra pessoa
+function drAplicarItem(chave, x) {
+  const d = drFlow.d, porOrdem = (a, b) => (a.ordem ?? 0) - (b.ordem ?? 0);
+  if (chave === 'cab') {
+    for (const k of ['loja', 'n_volumosos', 'hora_inicio', 'hora_fim', 'obs', 'criado_em', 'criado_por']) if (x[k] !== undefined) d[k] = x[k];
+    for (const [t] of DR_TIPOS) if (x.esperadas && t in x.esperadas) d.marf[t].esperada = x.esperadas[t];
+  } else if (chave.startsWith('real:')) { d.marf[chave.slice(5)].real = x.real; drGarantirCaixas(chave.slice(5)); }
+  else if (chave.startsWith('vol:')) {
+    const id = chave.slice(4); d.volumosos = d.volumosos.filter(v => v.id !== id);
+    if (!x.apagado) { d.volumosos.push({ ...x, id }); d.volumosos.sort(porOrdem); }
+  } else if (chave.startsWith('cx:')) {
+    const id = chave.slice(3); for (const [t] of DR_TIPOS) d.marf[t].caixas = d.marf[t].caixas.filter(c => c.id !== id);
+    if (!x.apagado && d.marf[x.tipo]) { const { tipo, ...c } = x; d.marf[tipo].caixas.push({ ...c, id }); d.marf[tipo].caixas.sort(porOrdem); }
+  }
+}
+const drGuardar = () => {
+  if (drFlow && DR_ETAPAS.indexOf(drFlow.etapa) >= 2)
+    store.set(drKey(), { ...drFlow.d, etapa: drFlow.etapa, _s: { remoto: drFlow.remoto, pend: drFlow.pend, vers: drFlow.vers, cursor: drFlow.cursor } });
+};
+
+// ── Sincronização do recebimento partilhado ──
+let drPushT = null, drPushando = null;
+function drAgendarPush() { clearTimeout(drPushT); drPushT = setTimeout(drPush, 700); }
+function drPush() {
+  if (drPushando) return drPushando;
+  drPushando = (async () => {
+    await 0;   // garante que drPushando já está atribuído antes de o finally o limpar
+    try {
+      while (drFlow && DR_ETAPAS.indexOf(drFlow.etapa) >= 2 && navigator.onLine) {
+        const f = drFlow, chaves = Object.keys(f.pend);
+        if (f.remoto && !chaves.length) break;
+        f.st = 'guardando'; drAtualizarPartilha();
+        if (!f.remoto) { await rpc('dr_sessao_criar', { p_token: sessao.token, p_id: f.d.id, p_loja: f.d.loja }); f.remoto = true; }
+        if (!chaves.length) continue;
+        const revs = Object.fromEntries(chaves.map(k => [k, f.pend[k]]));
+        const agora = await rpc('dr_sessao_gravar', { p_token: sessao.token, p_id: f.d.id, p_itens: chaves.map(k => ({ chave: k, dados: drItemDados(k) })) });
+        for (const k of chaves) { if (f.pend[k] === revs[k]) delete f.pend[k]; f.vers[k] = agora; }
+        if (drFlow === f) drGuardar();
+      }
+      if (drFlow) drFlow.st = navigator.onLine ? '' : 'offline';
+    } catch (e) {
+      if (e.message === 'SESSAO_INVALIDA') return expirou();
+      if (e.message === 'RECEBIMENTO_FECHADO') return drFechadoRemoto();
+      if (drFlow) drFlow.st = 'offline';
+    } finally { drPushando = null; drAtualizarPartilha(); }
+  })();
+  return drPushando;
+}
+async function drPull(tudo) {
+  const f = drFlow; if (!f?.remoto || !navigator.onLine) return;
+  const desde = tudo || !f.cursor ? null : new Date(Date.parse(f.cursor) - 5000).toISOString();
+  let r;
+  try { r = await rpc('dr_sessao_ler', { p_token: sessao.token, p_id: f.d.id, p_desde: desde }); }
+  catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); if (e.message === 'SESSAO_NAO_EXISTE') return; throw e; }
+  if (drFlow !== f) return;
+  f.participantes = r.participantes || [];
+  if (r.estado !== 'aberto') return drFechadoRemoto(r);
+  let mudou = false;
+  for (const it of r.itens) {
+    if (f.pend[it.chave]) continue;                                           // alteração local ainda por gravar: ganha a local
+    if (f.vers[it.chave] && Date.parse(it.em) <= Date.parse(f.vers[it.chave])) continue;
+    drAplicarItem(it.chave, it.dados); f.vers[it.chave] = it.em; mudou = true;
+  }
+  f.cursor = r.agora; drGuardar();
+  if (mudou) drRenderSeguro(); else drAtualizarPartilha();
+}
+function drFechadoRemoto(r) {
+  const quem = r?.fechado_por ? ` por ${r.fechado_por}` : '';
+  const msg = r?.estado === 'descartado' ? `Este recebimento foi cancelado${quem}.` : `Este recebimento já foi finalizado${quem}.`;
+  store.del(drKey());
+  if (drFlow) { drFlow = null; history.back(); }
+  tab = 'inicio'; render(); alert(msg); sincronizar();
+}
+setInterval(() => { if (drFlow && document.visibilityState === 'visible') { drPush(); drPull().catch(() => {}); } }, 4000);
+addEventListener('online', () => { if (drFlow) { drPush(); drPull().catch(() => {}); } });
+function drTextoPartilha() {
+  const f = drFlow; if (!f) return '';
+  if (!f.remoto) return navigator.onLine ? 'A preparar a partilha…' : 'Sem internet: fica guardado neste aparelho até haver conexão';
+  const outros = (f.participantes || []).filter(n => n !== sessao.nome);
+  const quem = outros.length ? `👥 Com ${outros.join(', ')}` : '👥 Partilhado · outras pessoas podem juntar-se';
+  const est = f.st === 'guardando' ? 'Guardando…' : f.st === 'offline' || !navigator.onLine ? 'Sem internet · guardado neste aparelho' : Object.keys(f.pend).length ? 'Por guardar' : '✓ Guardado';
+  return `${quem} · ${est}`;
+}
+function drAtualizarPartilha() { const el = $('#drpart'); if (el) el.textContent = drTextoPartilha(); }
+
+// ── Volumosos e marfinites ──
+function drAddVol() { const v = volVazio(); drFlow.d.volumosos.push(v); drMarcar('vol:' + v.id); drRender(); }
+function drRemVol(i) {
+  if (!confirm(`Remover o Volumoso ${i + 1}?`)) return;
+  const [v] = drFlow.d.volumosos.splice(i, 1); drMarcar('vol:' + v.id); drRender();
+}
+// Os marfinites criados pela "quantidade real" têm id fixo (tipo-nº): se duas pessoas o fizerem ao mesmo tempo, não duplica
 function drSincCaixas(t) {
   const m = drFlow.d.marf[t], n = m.real || 0, vazia = c => !c.codigo && c.skus == null && c.itens == null && !c.div.length;
-  while (m.caixas.length < n) m.caixas.push(caixaVazia());
-  while (m.caixas.length > n && vazia(m.caixas[m.caixas.length - 1])) m.caixas.pop();
+  for (let k = 1; m.caixas.length < n; k++) if (!m.caixas.some(c => c.id === `${t}-${k}`)) { const c = caixaVazia(`${t}-${k}`, k); m.caixas.push(c); drMarcar('cx:' + c.id); }
+  m.caixas.sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+  while (m.caixas.length > n && vazia(m.caixas[m.caixas.length - 1])) drMarcar('cx:' + m.caixas.pop().id);
   drGuardar(); drRender();
 }
-function drAddCaixa(t) { drFlow.d.marf[t].caixas.push(caixaVazia()); drGuardar(); drRender(); }
-function drRemCaixa(t, i) { if (!confirm(`Remover o Marfinite ${i + 1}?`)) return; drFlow.d.marf[t].caixas.splice(i, 1); drGuardar(); drRender(); }
-function drAddDiv(t, i) { drFlow.d.marf[t].caixas[i].div.push(linhaVazia()); drGuardar(); drRender(); }
-function drRemDiv(t, i, j) { drFlow.d.marf[t].caixas[i].div.splice(j, 1); drGuardar(); drRender(); }
+function drAddCaixa(t) { const c = caixaVazia(); drFlow.d.marf[t].caixas.push(c); drMarcar('cx:' + c.id); drRender(); }
+function drRemCaixa(t, i) {
+  if (!confirm(`Remover o Marfinite ${i + 1}?`)) return;
+  const [c] = drFlow.d.marf[t].caixas.splice(i, 1); drMarcar('cx:' + c.id); drRender();
+}
+function drAddDiv(t, i) { const c = drFlow.d.marf[t].caixas[i]; c.div.push(linhaVazia()); drMarcar('cx:' + c.id); drRender(); }
+function drRemDiv(t, i, j) { const c = drFlow.d.marf[t].caixas[i]; c.div.splice(j, 1); drMarcar('cx:' + c.id); drRender(); }
 const drDadosOk = d => !!(d.loja && d.n_volumosos != null && DR_TIPOS.every(([t]) => d.marf[t].esperada != null) && d.hora_inicio);
 function drIniciarConferencia() {
   const d = drFlow.d; if (!drDadosOk(d)) return;
   d.n_marfinites = DR_TIPOS.reduce((a, [t]) => a + d.marf[t].esperada, 0);
-  while (d.volumosos.length < d.n_volumosos) d.volumosos.push(linhaVazia());
+  for (let k = d.volumosos.length + 1; d.volumosos.length < d.n_volumosos; k++) d.volumosos.push(volVazio(`v-${k}`, k));
   store.set('rec_dr_loja', d.loja);
-  drIr('volumosos');
+  drFlow.etapa = 'volumosos'; drTudoPendente(); drIr('volumosos'); drPush();
+}
+
+// ── Juntar-se a um recebimento em andamento ──
+let drAbertas = [];
+async function drCarregarAbertas() {
+  try { drAbertas = await rpc('dr_sessoes_abertas', { p_token: sessao.token }); } catch { return; }
+  if (tela === 'divergencia_recebimento' && tab === 'inicio' && !emEdicao()) render();
+}
+async function drJuntar(id) {
+  const rasc = drRascunho();
+  if (rasc && rasc.id !== id) {
+    const local = !rasc._s?.remoto || Object.keys(rasc._s?.pend || {}).length;
+    if (!confirm(local ? 'Há outro recebimento neste aparelho com dados que ainda não foram para a base de dados. Se continuar, esses dados perdem-se. Continuar?'
+                       : 'Vai sair do seu recebimento atual neste aparelho (ele continua em andamento e pode voltar a ele pela lista). Continuar?')) return;
+  }
+  let r; try { r = await rpc('dr_sessao_ler', { p_token: sessao.token, p_id: id, p_desde: null }); } catch (e) { return alert(msgErro(e)); }
+  if (r.estado !== 'aberto') { drCarregarAbertas(); return alert('Este recebimento já não está em andamento.'); }
+  const d = drNovo(); d.id = id; d.criado_em = r.criado_em; d.criado_por = r.criado_por; d.loja = ''; d.hora_inicio = '';
+  drFlow = { etapa: 'volumosos', d, remoto: true, pend: {}, vers: {}, cursor: r.agora, participantes: r.participantes || [], st: '' };
+  for (const it of r.itens) { drAplicarItem(it.chave, it.dados); drFlow.vers[it.chave] = it.em; }
+  for (const [t] of DR_TIPOS) drGarantirCaixas(t);
+  drGuardar(); history.pushState({ dr: 1 }, ''); render(); scrollTo(0, 0);
+  toast('Você entrou no recebimento ✓');
+}
+async function drCancelarParaTodos(id) {
+  if (!confirm('Cancelar este recebimento para todos? O que foi preenchido deixa de estar disponível.')) return;
+  try { await rpc('dr_sessao_descartar', { p_token: sessao.token, p_id: id }); } catch (e) { return alert(msgErro(e)); }
+  if (drRascunho()?.id === id) store.del(drKey());
+  toast('Recebimento cancelado'); drCarregarAbertas(); render();
+}
+function drDescartarLocal() {
+  const rasc = drRascunho(); if (!rasc) return;
+  const souDono = rasc.criado_por === sessao.username || isAdmin();
+  if (rasc._s?.remoto) {
+    if (souDono) return drCancelarParaTodos(rasc.id);
+    if (!confirm('Sair deste recebimento neste aparelho? Ele continua em andamento para as outras pessoas.')) return;
+  } else if (!confirm('Descartar o recebimento em andamento? O que foi preenchido será perdido.')) return;
+  store.del(drKey()); render();
 }
 
 function drBadge(l) {
@@ -1207,7 +1392,7 @@ function vDrFlow() {
   const head = `<header class="top"><button onclick="drPasso(-1)">‹</button>
     <div class="t" style="text-align:center"><h1>Recebimento</h1><small>${esc(d.loja || 'Selecione a loja')}${i >= 2 ? ' · início ' + esc(d.hora_inicio) : ''}</small></div>
     <button onclick="drSair()" aria-label="Fechar">✕</button></header>`;
-  const passos = i >= 2 ? `<div class="drsteps">${DR_ETAPAS.slice(2).map((k, n) => `<button class="${k === e ? 'on' : ''}" onclick="drIr('${k}')"><b>${n + 1}</b>${DR_ROTULO[k]}</button>`).join('')}</div>` : '';
+  const passos = i >= 2 ? `<div class="partilha" id="drpart">${esc(drTextoPartilha())}</div><div class="drsteps">${DR_ETAPAS.slice(2).map((k, n) => `<button class="${k === e ? 'on' : ''}" onclick="drIr('${k}')"><b>${n + 1}</b>${DR_ROTULO[k]}</button>`).join('')}</div>` : '';
   let corpo;
   if (e === 'padrao') {
     corpo = `<div class="step">Antes de começar</div><div class="q">Como acompanhar o recebimento</div>
@@ -1272,16 +1457,32 @@ function drIso(dataIso, hhmm, depoisDe) {
   if (depoisDe && d < new Date(depoisDe)) d.setDate(d.getDate() + 1);
   return d.toISOString();
 }
-function drFinalizar() {
-  const d = drFlow.d; if (drProblemas(d).length) return;
+function drRegistro(d) {
   const ini = drIso(d.criado_em, d.hora_inicio), fim = drIso(d.criado_em, d.hora_fim, ini);
   d.n_marfinites = DR_TIPOS.reduce((a, [t]) => a + (d.marf[t].esperada || 0), 0);
-  const r = { id: d.id, criado_em: ini, loja: d.loja, cluster: CLUSTER_DE[d.loja], hora_inicio: ini, hora_fim: fim,
-              n_marfinites: d.n_marfinites, n_volumosos: d.n_volumosos, dados: { volumosos: d.volumosos, marf: d.marf },
-              resumo: drResumo(d), obs: d.obs.trim(), usuario: sessao.nome };
-  if (!guardarNaFila('divergencia_recebimento', r)) return;
-  store.del(drKey()); drFlow = null; history.back(); tab = 'inicio'; render(); scrollTo(0, 0);
-  toast('Recebimento salvo ✓'); sincronizar();
+  return { id: d.id, criado_em: ini, loja: d.loja, cluster: CLUSTER_DE[d.loja], hora_inicio: ini, hora_fim: fim,
+           n_marfinites: d.n_marfinites, n_volumosos: d.n_volumosos, dados: { volumosos: d.volumosos, marf: d.marf },
+           resumo: drResumo(d), obs: (d.obs || '').trim(), usuario: sessao.nome, versao: VERSAO };
+}
+function drFechar() { store.del(drKey()); drFlow = null; history.back(); tab = 'inicio'; render(); scrollTo(0, 0); toast('Recebimento salvo ✓'); sincronizar(); }
+async function drFinalizar() {
+  const f = drFlow, d = f.d; if (drProblemas(d).length) return;
+  // Nunca chegou à base de dados e sem internet: guarda para enviar depois, como antes
+  if (!f.remoto && !navigator.onLine) { if (guardarNaFila('divergencia_recebimento', drRegistro(d))) drFechar(); return; }
+  if (!navigator.onLine) return alert('Sem internet. Para finalizar um recebimento partilhado é preciso conexão. Os dados continuam guardados neste aparelho.');
+  const b = [...document.querySelectorAll('#app button')].find(x => x.textContent.startsWith('Finalizar e salvar')); if (b) { b.disabled = true; b.textContent = 'Finalizando…'; }
+  try {
+    await drPush(); if (Object.keys(f.pend).length) await drPush();
+    if (!f.remoto || Object.keys(f.pend).length) throw new Error('Sem conexão com o servidor.');
+    await drPull(true); if (drFlow !== f) return;
+    if (drProblemas(d).length) { drRender(); return alert('Ainda há campos por preencher (podem ter sido acrescentados por outra pessoa). Veja a lista.'); }
+    await rpc('dr_sessao_finalizar', { p_token: sessao.token, p_id: d.id, p_registro: drRegistro(d) });
+  } catch (e) {
+    if (e.message === 'SESSAO_INVALIDA') return expirou();
+    if (e.message === 'RECEBIMENTO_FECHADO') return drFechadoRemoto({ estado: 'finalizado' });
+    drRender(); return alert('Não foi possível finalizar agora. ' + msgErro(e));
+  }
+  drFechar();
 }
 
 // ── Ecrã inicial da ferramenta ──
@@ -1296,12 +1497,20 @@ function vDrItem(r) {
 }
 function vDrInicio() {
   const rasc = drRascunho(), meus = porData(registros('divergencia_recebimento')).filter(r => r._pendente || r.meu).slice(0, 5);
-  return `${rasc ? `<section class="card hero"><h2>Recebimento em andamento</h2><div class="big">${esc(rasc.loja)}</div>
-      <p>Início às ${esc(rasc.hora_inicio)} · etapa: ${esc(DR_ROTULO[rasc.etapa] || '')}</p>
+  const abertas = drAbertas.filter(a => a.id !== rasc?.id);
+  const dono = rasc && (rasc.criado_por === sessao.username || isAdmin());
+  const rotuloSair = !rasc?._s?.remoto ? 'Descartar' : dono ? 'Cancelar para todos' : 'Sair deste recebimento';
+  return `${rasc ? `<section class="card hero"><h2>Seu recebimento em andamento</h2><div class="big">${esc(rasc.loja)}</div>
+      <p>Início às ${esc(rasc.hora_inicio)} · etapa: ${esc(DR_ROTULO[rasc.etapa] || '')}${rasc._s?.remoto ? ' · 👥 partilhado' : ''}</p>
       <button class="btn light" onclick="drAbrir(true)">Continuar conferência</button>
-      <button class="btn ghost" style="color:#fff" onclick="if(confirm('Descartar o recebimento em andamento? O que foi preenchido será perdido.')){store.del(drKey());render()}">Descartar</button></section>`
-    : `<section class="card hero"><h2>Novo recebimento?</h2><p>Acompanhe a conferência do recebimento e registre as divergências de estoque.</p>
+      <button class="btn ghost" style="color:#fff" onclick="drDescartarLocal()">${rotuloSair}</button></section>`
+    : `<section class="card hero"><h2>Novo recebimento?</h2><p>Acompanhe a conferência do recebimento e registre as divergências de estoque. Outras pessoas podem juntar-se a você.</p>
       <button class="btn light" onclick="drAbrir(false)">+ Novo acompanhamento</button></section>`}
+    ${abertas.length ? `<h3 class="sec">Recebimentos em andamento · junte-se para ajudar</h3>${abertas.map(a => `<section class="card">
+        <div class="drh"><b>${esc(a.loja || 'Loja por definir')}</b><span class="bdg">👥 ${a.participantes || 1}</span></div>
+        <p class="mut sm-t" style="margin:0 0 10px">Iniciado por ${esc(a.criado_por_nome || '')}${a.hora_inicio ? ' às ' + esc(a.hora_inicio) : ''} · atualizado ${fmtData(a.atualizado_em).slice(11)}</p>
+        <div class="row"><button class="btn pri sm" onclick="drJuntar('${esc(a.id)}')">Juntar-me</button>
+          ${isAdmin() || a.criado_por === sessao.username ? `<button class="btn ghost sm" onclick="drCancelarParaTodos('${esc(a.id)}')">Cancelar</button>` : ''}</div></section>`).join('')}` : ''}
     ${meus.length ? `<h3 class="sec">Seus últimos recebimentos</h3>${meus.map(vDrItem).join('')}` : ''}`;
 }
 
