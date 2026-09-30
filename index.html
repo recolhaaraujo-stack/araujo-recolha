@@ -173,6 +173,10 @@ label.chk input{width:20px;height:20px}
 .drsum{margin:4px 4px 10px;font-size:14px;color:var(--mut)}
 .txmau{color:#b42318}
 .probs{background:#fff7f5;border:1.5px solid #f5c2bd}.probs h2{color:#b42318}.probs ul{margin:0;padding-left:18px;font-size:14px}.probs li{margin-bottom:4px}
+.marfrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0}
+.marfrow span{font-weight:600}.marfrow .in{width:110px;flex:none;text-align:center}
+.kdest .kpi{background:#fff7f5;box-shadow:inset 0 0 0 1.5px #f5c2bd}.kdest .kpi b{font-size:28px}
+.kpi small{display:block;font-size:12px;color:var(--mut);margin-top:4px}
 </style>
 </head>
 <body>
@@ -182,7 +186,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.0';
+const VERSAO = '4.1';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -742,7 +746,7 @@ function cancelar() {
 addEventListener('popstate', () => { if ($('#sheet').classList.contains('on')) fecharSheet(); if (flow) recuar(); });
 
 const PASSOS = [
-  ['⏱️', 'Faça logo', 'Faça o mapeamento assim que souber que o produto foi apontado como falta: de preferência no mesmo dia, ou antes do recebimento do dia seguinte.'],
+  ['⏱️', 'Faça imediatamente ou o mais cedo possível', 'Faça o mapeamento assim que souber que o produto foi apontado como falta: de preferência no mesmo dia, ou antes do recebimento do dia seguinte.'],
   ['🧾', 'Tenha o número do pedido', 'O número do pedido do clique e retire é obrigatório para registrar o apontamento.'],
   ['🔎', 'Procure bem o produto', 'Procure em todos os lugares onde ele pode estar: módulo do planograma, pontas naturais, pontas extras (paga, Saldão, confinamento, gerente, ilhas), subestoque e marfinite.'],
   ['🗣️', 'Se encontrar, converse com o vendedor', 'Pergunte se ele sabia onde o produto estava e se procurou em todos os locais previstos no padrão de Separação de Clique e Retire.'],
@@ -1018,13 +1022,15 @@ async function excluirProcesso(id) {
 
 // ── Divergências de Estoque no Recebimento ─────────────────────────────
 const DR_TIPOS = [['termolabil', 'Marfinite Termolábil'], ['comum', 'Marfinite Comum'], ['controlado', 'Marfinite Controlado']];
+const DR_PLURAL = { termolabil: 'Marfinites termolábeis', comum: 'Marfinites comuns', controlado: 'Marfinites controlados' };
 const DR_ETAPAS = ['padrao', 'dados', 'volumosos', 'termolabil', 'comum', 'controlado', 'fim'];
 const DR_ROTULO = { volumosos: 'Volumosos', termolabil: 'Termolábil', comum: 'Comum', controlado: 'Controlado', fim: 'Finalizar' };
 const DR_PASSOS = [
+  ['🖨️', 'Prepare as folhas', 'Antes de começar, imprima as folhas de conferência do recebimento.'],
   ['🕐', 'Comece junto com o recebimento', 'Abra o acompanhamento assim que o recebimento começar: a hora de início fica registrada. No fim, registre a hora em que terminou.'],
-  ['📦', 'Conte o que chegou', 'Antes de abrir, conte o nº de marfinites (caixas) e o nº de volumosos (SKUs distintos, como água, refrigerante e fraldas).'],
-  ['🔢', 'Confira por tipo, nesta ordem', 'Volumosos → marfinites termolábeis → marfinites comuns → marfinites controlados. Em cada tipo, compare o que deveria ter chegado com o que realmente chegou.'],
-  ['🧺', 'Marfinite a marfinite', 'Em cada marfinite, informe quantos SKUs deveriam vir e registre só os produtos com divergência: pacote, quantidade esperada e quantidade real.'],
+  ['📦', 'Informe o que deveria chegar', 'Informe o nº de volumosos (SKUs distintos, como água, refrigerante e fraldas) e o nº de marfinites esperados de cada tipo: termolábil, comum e controlado.'],
+  ['🔢', 'Confira por tipo, nesta ordem', 'Volumosos → marfinites termolábeis → marfinites comuns → marfinites controlados. Em cada tipo, registre quantos marfinites realmente chegaram.'],
+  ['🧮', 'Em cada marfinite, conte antes de conferir', 'Na folha do marfinite, conte o nº de SKUs distintos e o nº total de produtos esperados (use a calculadora). Depois confira o marfinite e registre só os produtos com divergência: pacote, quantidade esperada e quantidade real.'],
   ['✅', 'Finalize', 'Registre a hora de fim, revise o resumo e salve.'],
 ];
 let drFlow = null;                       // { etapa, d } — d é o rascunho do recebimento em curso
@@ -1038,6 +1044,7 @@ const pct = (a, b) => b ? a / b : 0;
 const fmtPct = x => `${(x * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 const vNum = v => v == null ? '' : v;
 const drTipoVazio = () => ({ esperada: null, real: null, caixas: [] });
+const caixaVazia = () => ({ skus: null, itens: null, div: [] });
 function drNovo() {
   return { id: uid(), criado_em: new Date().toISOString(), loja: sessao.loja || store.get('rec_dr_loja', ''), n_marfinites: null, n_volumosos: null,
            hora_inicio: horaAgora(), hora_fim: '', obs: '', volumosos: [],
@@ -1045,7 +1052,9 @@ function drNovo() {
 }
 
 // ── Cálculos ──
+// 1 linha de divergência = 1 SKU; os itens contam pela diferença (perda = faltou, sobra = veio a mais)
 const drLinhaDiv = l => l.esperada != null && l.real != null && l.esperada !== l.real;
+const drLinhaPerda = l => drLinhaDiv(l) && l.real < l.esperada;
 const drFalta = ls => ls.reduce((a, l) => a + (drLinhaDiv(l) ? Math.max(l.esperada - l.real, 0) : 0), 0);
 const drSobra = ls => ls.reduce((a, l) => a + (drLinhaDiv(l) ? Math.max(l.real - l.esperada, 0) : 0), 0);
 function drMinutos(ini, fim) {
@@ -1053,19 +1062,28 @@ function drMinutos(ini, fim) {
   const [h1, m1] = ini.split(':').map(Number), [h2, m2] = fim.split(':').map(Number);
   let m = (h2 * 60 + m2) - (h1 * 60 + m1); if (m < 0) m += 24 * 60; return m;
 }
+function drResumoLinhas(linhas, skus, itens) {
+  return { skus, itens, div: linhas.filter(drLinhaDiv).length, skus_perda: linhas.filter(drLinhaPerda).length, falta: drFalta(linhas), sobra: drSobra(linhas) };
+}
+// Percentagens a partir de totais (servem para um recebimento ou para a soma de vários)
+const drPcts = x => ({ pct: pct(x.div, x.skus), pct_perda_sku: pct(x.skus_perda, x.skus),
+                       pct_itens_div: pct((x.falta || 0) + (x.sobra || 0), x.itens), pct_itens_perda: pct(x.falta, x.itens) });
 function drResumo(d) {
-  const vol = { skus: d.volumosos.length, div: d.volumosos.filter(drLinhaDiv).length, falta: drFalta(d.volumosos), sobra: drSobra(d.volumosos) };
+  const vol = drResumoLinhas(d.volumosos, d.volumosos.length, d.volumosos.reduce((a, l) => a + (l.esperada || 0), 0));
+  Object.assign(vol, drPcts(vol));
   const tipos = {};
   for (const [t] of DR_TIPOS) {
     const m = d.marf[t], linhas = m.caixas.flatMap(c => c.div);
-    tipos[t] = { marf_esp: m.esperada || 0, marf_real: m.real || 0, marf_falta: Math.max((m.esperada || 0) - (m.real || 0), 0),
-                 marf_sobra: Math.max((m.real || 0) - (m.esperada || 0), 0),
-                 skus: m.caixas.reduce((a, c) => a + (c.skus || 0), 0), div: linhas.filter(drLinhaDiv).length, falta: drFalta(linhas), sobra: drSobra(linhas) };
+    const x = { ...drResumoLinhas(linhas, m.caixas.reduce((a, c) => a + (c.skus || 0), 0), m.caixas.reduce((a, c) => a + (c.itens || 0), 0)),
+                marf_esp: m.esperada || 0, marf_real: m.real || 0,
+                marf_falta: Math.max((m.esperada || 0) - (m.real || 0), 0), marf_sobra: Math.max((m.real || 0) - (m.esperada || 0), 0) };
+    tipos[t] = Object.assign(x, drPcts(x));
   }
-  const T = Object.values(tipos), skus = vol.skus + T.reduce((a, x) => a + x.skus, 0), div = vol.div + T.reduce((a, x) => a + x.div, 0);
-  return { skus, div, pct: pct(div, skus), falta: vol.falta + T.reduce((a, x) => a + x.falta, 0), sobra: vol.sobra + T.reduce((a, x) => a + x.sobra, 0),
-           marf_esp: T.reduce((a, x) => a + x.marf_esp, 0), marf_real: T.reduce((a, x) => a + x.marf_real, 0), marf_falta: T.reduce((a, x) => a + x.marf_falta, 0),
-           duracao_min: drMinutos(d.hora_inicio, d.hora_fim), volumosos: vol, tipos };
+  const T = [vol, ...Object.values(tipos)], soma = k => T.reduce((a, x) => a + (x[k] || 0), 0);
+  const r = { skus: soma('skus'), itens: soma('itens'), div: soma('div'), skus_perda: soma('skus_perda'), falta: soma('falta'), sobra: soma('sobra'),
+              marf_esp: soma('marf_esp'), marf_real: soma('marf_real'), marf_falta: soma('marf_falta'),
+              duracao_min: drMinutos(d.hora_inicio, d.hora_fim), volumosos: vol, tipos };
+  return Object.assign(r, drPcts(r));
 }
 function drProblemas(d) {
   const p = [];
@@ -1076,17 +1094,21 @@ function drProblemas(d) {
     const f = [!v.pacote && 'pacote', v.esperada == null && 'qtd. esperada', v.real == null && 'qtd. real'].filter(Boolean);
     if (f.length) p.push(`Volumoso ${i + 1}: ${f.join(', ')}`);
   });
-  for (const [t, nome] of DR_TIPOS) {
+  for (const [t] of DR_TIPOS) {
     const m = d.marf[t], curto = DR_ROTULO[t];
-    if (m.esperada == null || m.real == null) p.push(`${curto}: quantidade de marfinites esperada e real`);
+    if (m.esperada == null) p.push(`${curto}: nº de marfinites esperados (nos dados do recebimento)`);
+    if (m.real == null) p.push(`${curto}: quantidade real de marfinites`);
     m.caixas.forEach((c, i) => {
-      if (c.skus == null) p.push(`${curto} · Marfinite ${i + 1}: nº de SKUs esperados`);
+      const nome = `${curto} · Marfinite ${i + 1}`;
+      if (c.skus == null) p.push(`${nome}: nº de SKUs esperados`);
+      if (c.itens == null) p.push(`${nome}: total de itens esperados`);
+      if (c.skus != null && c.itens != null && c.itens < c.skus) p.push(`${nome}: o total de itens não pode ser menor que o nº de SKUs`);
       c.div.forEach((l, j) => {
         const f = [!l.pacote && 'pacote', l.esperada == null && 'qtd. esperada', l.real == null && 'qtd. real'].filter(Boolean);
-        if (f.length) p.push(`${curto} · Marfinite ${i + 1} · divergência ${j + 1}: ${f.join(', ')}`);
-        else if (l.esperada === l.real) p.push(`${curto} · Marfinite ${i + 1} · divergência ${j + 1}: quantidades iguais (não é divergência)`);
+        if (f.length) p.push(`${nome} · divergência ${j + 1}: ${f.join(', ')}`);
+        else if (l.esperada === l.real) p.push(`${nome} · divergência ${j + 1}: quantidades iguais (não é divergência)`);
       });
-      if (c.skus != null && c.div.length > c.skus) p.push(`${curto} · Marfinite ${i + 1}: mais divergências do que SKUs esperados`);
+      if (c.skus != null && c.div.length > c.skus) p.push(`${nome}: mais divergências do que SKUs esperados`);
     });
   }
   return p;
@@ -1095,6 +1117,7 @@ function drProblemas(d) {
 // ── Fluxo (ecrã inteiro) ──
 function drAbrir(continuar) {
   const r = continuar ? drRascunho() : null;
+  if (r) for (const [t] of DR_TIPOS) r.marf[t].caixas.forEach(c => { if (!('itens' in c)) c.itens = null; });   // rascunhos da v4.0
   drFlow = r ? { etapa: DR_ETAPAS.includes(r.etapa) ? r.etapa : 'volumosos', d: r } : { etapa: 'padrao', d: drNovo() };
   history.pushState({ dr: 1 }, ''); render(); scrollTo(0, 0);
 }
@@ -1121,18 +1144,19 @@ const linhaVazia = () => ({ pacote: '', esperada: null, real: null });
 function drAddVol() { drFlow.d.volumosos.push(linhaVazia()); drGuardar(); drRender(); }
 function drRemVol(i) { if (!confirm(`Remover o Volumoso ${i + 1}?`)) return; drFlow.d.volumosos.splice(i, 1); drGuardar(); drRender(); }
 function drSincCaixas(t) {
-  const m = drFlow.d.marf[t], n = m.real || 0, vazia = c => c.skus == null && !c.div.length;
-  while (m.caixas.length < n) m.caixas.push({ skus: null, div: [] });
+  const m = drFlow.d.marf[t], n = m.real || 0, vazia = c => c.skus == null && c.itens == null && !c.div.length;
+  while (m.caixas.length < n) m.caixas.push(caixaVazia());
   while (m.caixas.length > n && vazia(m.caixas[m.caixas.length - 1])) m.caixas.pop();
   drGuardar(); drRender();
 }
-function drAddCaixa(t) { drFlow.d.marf[t].caixas.push({ skus: null, div: [] }); drGuardar(); drRender(); }
+function drAddCaixa(t) { drFlow.d.marf[t].caixas.push(caixaVazia()); drGuardar(); drRender(); }
 function drRemCaixa(t, i) { if (!confirm(`Remover o Marfinite ${i + 1}?`)) return; drFlow.d.marf[t].caixas.splice(i, 1); drGuardar(); drRender(); }
 function drAddDiv(t, i) { drFlow.d.marf[t].caixas[i].div.push(linhaVazia()); drGuardar(); drRender(); }
 function drRemDiv(t, i, j) { drFlow.d.marf[t].caixas[i].div.splice(j, 1); drGuardar(); drRender(); }
+const drDadosOk = d => !!(d.loja && d.n_volumosos != null && DR_TIPOS.every(([t]) => d.marf[t].esperada != null) && d.hora_inicio);
 function drIniciarConferencia() {
-  const d = drFlow.d;
-  if (!d.loja || d.n_marfinites == null || d.n_volumosos == null || !d.hora_inicio) return;
+  const d = drFlow.d; if (!drDadosOk(d)) return;
+  d.n_marfinites = DR_TIPOS.reduce((a, [t]) => a + d.marf[t].esperada, 0);
   while (d.volumosos.length < d.n_volumosos) d.volumosos.push(linhaVazia());
   store.set('rec_dr_loja', d.loja);
   drIr('volumosos');
@@ -1142,11 +1166,11 @@ function drBadge(l) {
   if (l.esperada == null || l.real == null) return '<span class="bdg">a preencher</span>';
   if (l.esperada === l.real) return '<span class="bdg ok">✓ OK</span>';
   const x = l.real - l.esperada;
-  return `<span class="bdg ${x < 0 ? 'mau' : 'aviso'}">${x < 0 ? 'Falta ' + -x : 'Sobra ' + x}</span>`;
+  return `<span class="bdg ${x < 0 ? 'mau' : 'aviso'}">${x < 0 ? 'Perda ' + -x : 'Sobra ' + x}</span>`;
 }
-function drCamposLinha(base, l, redesenharPacote = true) {
+function drCamposLinha(base, l) {
   const cam = k => JSON.stringify([...base, k]).replace(/"/g, "'");
-  return `<select class="in" onchange="drSet(${cam('pacote')},this.value,${redesenharPacote})"><option value="">Pacote…</option>
+  return `<select class="in" onchange="drSet(${cam('pacote')},this.value,true)"><option value="">Pacote…</option>
       ${PACOTES.map(p => `<option ${l.pacote === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
     <div class="g2c"><label>Qtd. esperada<input class="in" inputmode="numeric" value="${vNum(l.esperada)}" placeholder="0"
         oninput="this.value=this.value.replace(/\\D/g,'');drSet(${cam('esperada')},numOuNull(this.value))" onchange="drRender()"></label>
@@ -1162,6 +1186,19 @@ function drNav(prox = 'Próximo') {
   return `<div class="row" style="margin-top:18px"><button class="btn sec" onclick="drPasso(-1)">‹ Anterior</button>
     <button class="btn pri" onclick="drPasso(1)">${prox} ›</button></div>`;
 }
+// Indicadores (fim da conferência, detalhe e painel). As perdas ficam em destaque.
+function drKpis(x, extra = '') {
+  return `<div class="kg kdest">
+      <div class="kpi"><b class="${x.skus_perda ? 'txmau' : ''}">${fmtPct(x.pct_perda_sku)}</b><span>SKUs com perda</span><small>${x.skus_perda} de ${x.skus} SKUs</small></div>
+      <div class="kpi"><b class="${x.falta ? 'txmau' : ''}">${fmtPct(x.pct_itens_perda)}</b><span>itens em perda</span><small>${x.falta} de ${x.itens} itens</small></div>
+    </div>
+    <div class="kg">
+      <div class="kpi"><b>${fmtPct(x.pct)}</b><span>SKUs com divergência</span><small>${x.div} de ${x.skus} SKUs</small></div>
+      <div class="kpi"><b>${fmtPct(x.pct_itens_div)}</b><span>itens com divergência</span><small>${x.falta + x.sobra} de ${x.itens} (${x.falta} perda · ${x.sobra} sobra)</small></div>
+      <div class="kpi"><b>${x.marf_falta}</b><span>${x.marf_falta === 1 ? 'marfinite em falta' : 'marfinites em falta'}</span><small>de ${x.marf_esp} esperados</small></div>
+      ${extra}
+    </div>`;
+}
 function vDrFlow() {
   const d = drFlow.d, e = drFlow.etapa, i = DR_ETAPAS.indexOf(e);
   const head = `<header class="top"><button onclick="drPasso(-1)">‹</button>
@@ -1174,52 +1211,48 @@ function vDrFlow() {
       <ol class="passos">${DR_PASSOS.map(([ic, t, x]) => `<li><span class="pic">${ic}</span><div><b>${esc(t)}</b><p>${esc(x)}</p></div></li>`).join('')}</ol>
       <div style="margin-top:auto;padding-top:12px"><button class="btn pri" onclick="drIr('dados')">Iniciar acompanhamento</button></div>`;
   } else if (e === 'dados') {
-    const ok = d.loja && d.n_marfinites != null && d.n_volumosos != null && d.hora_inicio;
-    corpo = `<div class="step">Dados do recebimento</div><div class="q">O que chegou?</div>
+    corpo = `<div class="step">Dados do recebimento</div><div class="q">O que deveria chegar?</div>
       <div class="fld"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(d.loja, "drSet(['loja'],this.value,true)")}</div>
-      <div class="fld"><label class="f">Nº de marfinites <span style="font-weight:400">(nº de caixas)</span></label>${drNumInput(['n_marfinites'], d.n_marfinites)}</div>
       <div class="fld"><label class="f">Nº de volumosos <span style="font-weight:400">(SKUs volumosos distintos)</span></label>${drNumInput(['n_volumosos'], d.n_volumosos)}</div>
+      <label class="f">Nº de marfinites esperados</label>
+      <div class="card" style="padding:12px 14px">${DR_TIPOS.map(([t]) => `<div class="marfrow"><span>${DR_PLURAL[t]}</span>${drNumInput(['marf', t, 'esperada'], d.marf[t].esperada)}</div>`).join('')}
+        <p class="mut sm-t" style="margin:8px 0 0">Total: ${DR_TIPOS.reduce((a, [t]) => a + (d.marf[t].esperada || 0), 0)} marfinites. Na conferência de cada tipo você informa só quantos realmente chegaram.</p></div>
       <div class="fld"><label class="f">Hora de início</label><input class="in" type="time" value="${esc(d.hora_inicio)}" onchange="drSet(['hora_inicio'],this.value,true)"></div>
       <p class="mut sm-t">A data de hoje fica registrada automaticamente. A hora de fim é registrada no final da conferência.</p>
-      <div style="margin-top:auto;padding-top:12px"><button class="btn pri" onclick="drIniciarConferencia()" ${ok ? '' : 'disabled'}>Iniciar conferência</button></div>`;
+      <div style="margin-top:auto;padding-top:12px"><button class="btn pri" onclick="drIniciarConferencia()" ${drDadosOk(d) ? '' : 'disabled'}>Iniciar conferência</button></div>`;
   } else if (e === 'volumosos') {
     const r = drResumo(d).volumosos;
     corpo = `${passos}<div class="step">Etapa 1 de 5</div><div class="q">Volumosos</div>
       <div class="hint">Cada volumoso é um SKU (ex.: água, refrigerante, fraldas). Para cada um, informe o pacote, a quantidade que deveria ter chegado e a quantidade que realmente chegou.</div>
-      <p class="drsum">${plural(r.skus, 'volumoso', 'volumosos')} · <b class="${r.div ? 'txmau' : ''}">${plural(r.div, 'com divergência', 'com divergência')}</b></p>
+      <p class="drsum">${plural(r.skus, 'volumoso', 'volumosos')} · ${r.itens} itens esperados · <b class="${r.skus_perda ? 'txmau' : ''}">${r.skus_perda} com perda</b>${r.div - r.skus_perda ? ` · ${r.div - r.skus_perda} com sobra` : ''}</p>
       ${d.volumosos.map((v, k) => `<section class="card drit"><div class="drh"><b>Volumoso ${k + 1}</b>${drBadge(v)}<button class="x" onclick="drRemVol(${k})" aria-label="Remover">✕</button></div>
         ${drCamposLinha(['volumosos', k], v)}</section>`).join('') || '<div class="empty" style="padding:14px">Nenhum volumoso. Se não chegou nenhum, avance.</div>'}
-      <button class="btn sec" onclick="drAddVol()">+ Registrar +1 volumoso</button>${drNav()}`;
+      <button class="btn sec" onclick="drAddVol()">Registrar +1 Volumoso</button>${drNav()}`;
   } else if (e !== 'fim') {
     const t = e, nome = DR_TIPOS.find(x => x[0] === t)[1], m = d.marf[t], r = drResumo(d).tipos[t];
     const nMarf = m.esperada != null && m.real != null ? (m.real < m.esperada ? `<span class="bdg mau">Faltam ${m.esperada - m.real}</span>` : m.real > m.esperada ? `<span class="bdg aviso">Sobram ${m.real - m.esperada}</span>` : '<span class="bdg ok">✓ OK</span>') : '';
     corpo = `${passos}<div class="step">Etapa ${i - 1} de 5</div><div class="q">Conferência ${esc(nome)}</div>
-      <div class="hint">Primeiro compare a quantidade de marfinites que deveria ter chegado com a que realmente chegou. Depois confira marfinite a marfinite: informe quantos SKUs deveriam vir e registre só os produtos com divergência.</div>
-      <section class="card"><div class="drh"><b>Quantidade de marfinites</b>${nMarf}</div>
-        <div class="g2c"><label>Esperada${drNumInput(['marf', t, 'esperada'], m.esperada)}</label>
-          <label>Real${drNumInput(['marf', t, 'real'], m.real, `drSincCaixas('${t}')`)}</label></div></section>
-      ${m.caixas.length ? `<p class="drsum">${r.skus} SKUs esperados · <b class="${r.div ? 'txmau' : ''}">${plural(r.div, 'divergência', 'divergências')}</b></p>` : ''}
-      ${m.caixas.map((c, k) => `<section class="card drit"><div class="drh"><b>Marfinite ${k + 1}</b>
-          ${c.skus != null ? `<span class="bdg ${c.div.filter(drLinhaDiv).length ? 'mau' : 'ok'}">${c.div.filter(drLinhaDiv).length ? plural(c.div.filter(drLinhaDiv).length, 'divergência', 'divergências') : '✓ sem divergência'}</span>` : '<span class="bdg">a preencher</span>'}
+      <div class="hint">Informe quantos marfinites deste tipo realmente chegaram. Depois, em cada marfinite: conte na folha o nº de SKUs distintos e o total de itens esperados (use a calculadora), confira o marfinite e registre só os produtos com divergência.</div>
+      <section class="card"><div class="drh"><b>Marfinites</b>${nMarf}</div>
+        <div class="g2c" style="margin-top:0"><label>Esperados<div class="in" style="background:var(--bg);margin-top:4px">${m.esperada ?? '—'}</div></label>
+          <label>Chegaram (real)${drNumInput(['marf', t, 'real'], m.real, `drSincCaixas('${t}')`)}</label></div>
+        <p class="mut sm-t" style="margin:8px 0 0">O nº esperado foi informado nos dados do recebimento.</p></section>
+      ${m.caixas.length ? `<p class="drsum">${r.skus} SKUs · ${r.itens} itens esperados · <b class="${r.falta ? 'txmau' : ''}">${r.falta} ${r.falta === 1 ? 'item' : 'itens'} em perda</b>${r.sobra ? ` · ${r.sobra} a mais` : ''}</p>` : ''}
+      ${m.caixas.map((c, k) => { const nd = c.div.filter(drLinhaDiv).length; return `<section class="card drit"><div class="drh"><b>Marfinite ${k + 1}</b>
+          ${c.skus != null && c.itens != null ? `<span class="bdg ${nd ? 'mau' : 'ok'}">${nd ? plural(nd, 'divergência', 'divergências') : '✓ sem divergência'}</span>` : '<span class="bdg">a preencher</span>'}
           <button class="x" onclick="drRemCaixa('${t}',${k})" aria-label="Remover">✕</button></div>
-        <label class="f">Nº de SKUs que deveriam vir neste marfinite</label>${drNumInput(['marf', t, 'caixas', k, 'skus'], c.skus)}
+        <div class="g2c" style="margin-top:0"><label>Nº de SKUs esperados${drNumInput(['marf', t, 'caixas', k, 'skus'], c.skus)}</label>
+          <label>Total de itens esperados${drNumInput(['marf', t, 'caixas', k, 'itens'], c.itens)}</label></div>
         ${c.div.map((l, j) => `<div class="drdiv"><div class="drh"><span>Divergência ${j + 1}</span>${drBadge(l)}<button class="x" onclick="drRemDiv('${t}',${k},${j})" aria-label="Remover">✕</button></div>
           ${drCamposLinha(['marf', t, 'caixas', k, 'div', j], l)}</div>`).join('')}
-        <button class="btn ghost sm" onclick="drAddDiv('${t}',${k})">+ Registrar +1 divergência</button></section>`).join('')
-        || `<div class="empty" style="padding:14px">${m.real == null ? 'Preencha a quantidade real de marfinites para abrir a conferência de cada um.' : 'Nenhum marfinite deste tipo.'}</div>`}
-      <button class="btn sec" onclick="drAddCaixa('${t}')">+ Registrar +1 marfinite</button>${drNav(t === 'controlado' ? 'Finalizar' : 'Próximo')}`;
+        <button class="btn ghost sm" onclick="drAddDiv('${t}',${k})">Registrar +1 Divergência</button></section>`; }).join('')
+        || `<div class="empty" style="padding:14px">${m.real == null ? 'Informe quantos marfinites chegaram para abrir a conferência de cada um.' : 'Nenhum marfinite deste tipo.'}</div>`}
+      <button class="btn sec" onclick="drAddCaixa('${t}')">Registrar +1 Marfinite</button>${drNav(t === 'controlado' ? 'Finalizar' : 'Próximo')}`;
   } else {
     const r = drResumo(d), prob = drProblemas(d);
-    const somaTipos = DR_TIPOS.reduce((a, [t]) => a + (d.marf[t].esperada || 0), 0);
     corpo = `${passos}<div class="step">Etapa 5 de 5</div><div class="q">Finalizar recebimento</div>
       <div class="fld"><label class="f">Hora de fim</label><input class="in" type="time" value="${esc(d.hora_fim)}" onchange="drSet(['hora_fim'],this.value,true)"></div>
-      <div class="kg">
-        <div class="kpi"><b class="${r.div ? 'txmau' : ''}">${fmtPct(r.pct)}</b><span>SKUs com divergência</span></div>
-        <div class="kpi"><b>${r.div} / ${r.skus}</b><span>SKUs divergentes / esperados</span></div>
-        <div class="kpi"><b>${r.marf_falta}</b><span>${r.marf_falta === 1 ? 'marfinite em falta' : 'marfinites em falta'}</span></div>
-        <div class="kpi"><b>${r.duracao_min != null ? r.duracao_min + ' min' : '—'}</b><span>duração</span></div>
-      </div>
-      ${d.n_marfinites != null && somaTipos !== d.n_marfinites ? `<div class="hint">Atenção: no início foram informados ${d.n_marfinites} marfinites, mas a soma dos esperados por tipo é ${somaTipos}.</div>` : ''}
+      ${drKpis(r, `<div class="kpi"><b>${r.duracao_min != null ? r.duracao_min + ' min' : '—'}</b><span>duração</span></div>`)}
       <div class="fld"><label class="f">Observação <span style="font-weight:400">(opcional)</span></label>
         <textarea class="in" rows="3" placeholder="Algo fora do normal neste recebimento?" oninput="drSet(['obs'],this.value)">${esc(d.obs)}</textarea></div>
       ${prob.length ? `<section class="card probs"><h2>Falta preencher (${prob.length})</h2><ul>${prob.map(x => `<li>${esc(x)}</li>`).join('')}</ul></section>` : ''}
@@ -1238,6 +1271,7 @@ function drIso(dataIso, hhmm, depoisDe) {
 function drFinalizar() {
   const d = drFlow.d; if (drProblemas(d).length) return;
   const ini = drIso(d.criado_em, d.hora_inicio), fim = drIso(d.criado_em, d.hora_fim, ini);
+  d.n_marfinites = DR_TIPOS.reduce((a, [t]) => a + (d.marf[t].esperada || 0), 0);
   const r = { id: d.id, criado_em: ini, loja: d.loja, cluster: CLUSTER_DE[d.loja], hora_inicio: ini, hora_fim: fim,
               n_marfinites: d.n_marfinites, n_volumosos: d.n_volumosos, dados: { volumosos: d.volumosos, marf: d.marf },
               resumo: drResumo(d), obs: d.obs.trim(), usuario: sessao.nome };
@@ -1247,12 +1281,14 @@ function drFinalizar() {
 }
 
 // ── Ecrã inicial da ferramenta ──
+// Resumo de um registro, recalculado a partir dos dados (registros da v4.0 não tinham o total de itens)
+const drRes = r => r.dados?.volumosos ? drResumo({ ...r.dados, hora_inicio: r.hora_inicio ? fmtData(r.hora_inicio).slice(11) : '', hora_fim: r.hora_fim ? fmtData(r.hora_fim).slice(11) : '' }) : (r.resumo || {});
 function vDrItem(r) {
-  const s = r.resumo || {};
+  const s = drRes(r);
   return `<button class="item" onclick="detalheDr('${esc(r.id)}')">
     <div class="l1"><span>${fmtData(r.hora_inicio)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${s.duracao_min != null ? s.duracao_min + ' min' : ''}</span></div>
     <div class="l2">${esc(r.loja)}</div>
-    <span class="chip ${s.div ? 'imp' : ''}">${fmtPct(s.pct || 0)} SKUs com divergência · ${s.div || 0}/${s.skus || 0}</span></button>`;
+    <span class="chip ${s.skus_perda ? 'imp' : ''}">${fmtPct(s.pct_perda_sku || 0)} SKUs com perda · ${fmtPct(s.pct_itens_perda || 0)} itens em perda</span></button>`;
 }
 function vDrInicio() {
   const rasc = drRascunho(), meus = porData(registros('divergencia_recebimento')).filter(r => r._pendente || r.meu).slice(0, 5);
@@ -1272,16 +1308,16 @@ function drFiltrar() {
   return registros('divergencia_recebimento').filter(r => (!cluster || r.cluster === cluster) && (!loja || r.loja === loja)
     && (t => t >= t0 && t <= t1)(new Date(r.hora_inicio).getTime()));
 }
+const DR_CAMPOS = ['skus', 'itens', 'div', 'skus_perda', 'falta', 'sobra', 'marf_esp', 'marf_real', 'marf_falta'];
 function drSomar(lista) {
-  const z = () => ({ skus: 0, div: 0, falta: 0, sobra: 0, marf_esp: 0, marf_real: 0, marf_falta: 0 });
+  const z = () => Object.fromEntries(DR_CAMPOS.map(k => [k, 0]));
   const tot = { n: lista.length, ...z(), dur: 0, nDur: 0, vol: z(), tipos: Object.fromEntries(DR_TIPOS.map(([t]) => [t, z()])) };
   for (const r of lista) {
-    const s = r.resumo || {};
-    for (const k of ['skus', 'div', 'falta', 'sobra', 'marf_esp', 'marf_real', 'marf_falta']) tot[k] += s[k] || 0;
+    const s = drRes(r);
+    for (const k of DR_CAMPOS) { tot[k] += s[k] || 0; tot.vol[k] += s.volumosos?.[k] || 0; for (const [t] of DR_TIPOS) tot.tipos[t][k] += s.tipos?.[t]?.[k] || 0; }
     if (s.duracao_min != null) { tot.dur += s.duracao_min; tot.nDur++; }
-    for (const k of ['skus', 'div', 'falta', 'sobra']) tot.vol[k] += s.volumosos?.[k] || 0;
-    for (const [t] of DR_TIPOS) for (const k of Object.keys(tot.tipos[t])) tot.tipos[t][k] += s.tipos?.[t]?.[k] || 0;
   }
+  Object.assign(tot, drPcts(tot)); Object.assign(tot.vol, drPcts(tot.vol)); for (const [t] of DR_TIPOS) Object.assign(tot.tipos[t], drPcts(tot.tipos[t]));
   return tot;
 }
 // Todas as linhas de SKU (volumosos todos; marfinites só as divergências)
@@ -1300,47 +1336,40 @@ function vDrPainel() {
       <div class="g2c"><label>De<input class="in" type="date" value="${drFiltros.de}" onchange="drSetF('de',this.value)"></label>
         <label>Até<input class="in" type="date" value="${drFiltros.ate}" onchange="drSetF('ate',this.value)"></label></div></div></section>`;
   if (!lista.length) return filtrosH + '<div class="empty">Nenhum recebimento com estes filtros.</div>';
-  const barra = (x, max = 1) => `<div class="bar"><i style="width:${Math.min(100, x / (max || 1) * 100).toFixed(1)}%"></i></div>`;
+  const barra = (x, max) => `<div class="bar"><i style="width:${Math.min(100, x / (max || 1) * 100).toFixed(1)}%"></i></div>`;
+  const linhaPerda = (n, x, max, pre = '') => `<div class="par"><div class="n rk"><span>${esc(n)}</span><b class="${x.skus_perda ? 'txmau' : ''}">${fmtPct(x.pct_perda_sku)}</b></div>${barra(x.pct_perda_sku, max)}
+    <div class="v">${pre}${x.skus_perda} de ${x.skus} SKUs com perda · itens em perda ${fmtPct(x.pct_itens_perda)} (${x.falta} de ${x.itens}) · divergência ${fmtPct(x.pct)}</div></div>`;
   const tipos = [['Volumosos', T.vol], ...DR_TIPOS.map(([t, n]) => [n, T.tipos[t]])];
-  const maxTipo = Math.max(...tipos.map(([, x]) => pct(x.div, x.skus)), 0.0001);
+  const maxTipo = Math.max(...tipos.map(([, x]) => x.pct_perda_sku), 0.0001);
   const lojasU = drFiltros.loja ? [drFiltros.loja] : LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]);
-  const porLoja = lojasU.map(l => [l, drSomar(lista.filter(r => r.loja === l))]).sort((a, b) => (b[1].n ? 1 : 0) - (a[1].n ? 1 : 0) || pct(b[1].div, b[1].skus) - pct(a[1].div, a[1].skus) || a[0].localeCompare(b[0]));
-  const maxLoja = Math.max(...porLoja.map(([, x]) => pct(x.div, x.skus)), 0.0001), semRec = porLoja.filter(([, x]) => !x.n).length;
-  const pacotes = contarPor(lista.flatMap(drLinhas).filter(drLinhaDiv), l => l.pacote);
+  const porLoja = lojasU.map(l => [l, drSomar(lista.filter(r => r.loja === l))])
+    .sort((a, b) => (b[1].n ? 1 : 0) - (a[1].n ? 1 : 0) || b[1].pct_perda_sku - a[1].pct_perda_sku || a[0].localeCompare(b[0]));
+  const maxLoja = Math.max(...porLoja.map(([, x]) => x.pct_perda_sku), 0.0001), semRec = porLoja.filter(([, x]) => !x.n).length;
+  const perdasPac = new Map(); lista.flatMap(drLinhas).filter(drLinhaPerda).forEach(l => perdasPac.set(l.pacote, (perdasPac.get(l.pacote) || 0) + l.esperada - l.real));
   return `${filtrosH}
-    <div class="kg">
-      <div class="kpi"><b>${T.n}</b><span>recebimentos</span></div>
-      <div class="kpi"><b class="${T.div ? 'txmau' : ''}">${fmtPct(pct(T.div, T.skus))}</b><span>SKUs com divergência</span></div>
-      <div class="kpi"><b>${T.div} / ${T.skus}</b><span>SKUs divergentes / esperados</span></div>
-      <div class="kpi"><b>${T.marf_falta}</b><span>${T.marf_falta === 1 ? 'marfinite em falta' : 'marfinites em falta'} (de ${T.marf_esp})</span></div>
-      <div class="kpi"><b>${T.falta}</b><span>${T.falta === 1 ? 'unidade em falta' : 'unidades em falta'}</span></div>
-      <div class="kpi"><b>${T.sobra}</b><span>${T.sobra === 1 ? 'unidade a mais' : 'unidades a mais'}</span></div>
-    </div>
-    <section class="card"><h2>% SKUs com divergência, por tipo</h2>
-      ${tipos.map(([n, x]) => `<div class="par"><div class="n rk"><span>${esc(n)}</span><b>${fmtPct(pct(x.div, x.skus))}</b></div>${barra(pct(x.div, x.skus), maxTipo)}
-        <div class="v">${x.div} de ${x.skus} SKUs${x.marf_esp != null && n !== 'Volumosos' ? ` · marfinites: ${x.marf_real} de ${x.marf_esp}` : ''}</div></div>`).join('')}</section>
-    <section class="card"><h2>% SKUs com divergência, por loja${semRec ? ` · <span class="zc">${semRec} sem recebimentos</span>` : ''}</h2>
-      ${porLoja.map(([l, x]) => `<div class="par ${x.n ? '' : 'zero'}"><div class="n rk"><span>${esc(l)}</span><b>${x.n ? fmtPct(pct(x.div, x.skus)) : '—'}</b></div>${barra(pct(x.div, x.skus), maxLoja)}
-        <div class="v">${x.n ? `${plural(x.n, 'recebimento', 'recebimentos')} · ${x.div} de ${x.skus} SKUs` : 'sem recebimentos'}</div></div>`).join('')}</section>
-    ${vRanking('drpac', 'Divergências por pacote', pacotes)}
+    ${drKpis(T, `<div class="kpi"><b>${T.n}</b><span>recebimentos</span><small>${T.nDur ? 'duração média ' + Math.round(T.dur / T.nDur) + ' min' : ''}</small></div>`)}
+    <section class="card"><h2>% SKUs com perda, por tipo</h2>${tipos.map(([n, x]) => linhaPerda(n, x, maxTipo)).join('')}</section>
+    <section class="card"><h2>% SKUs com perda, por loja${semRec ? ` · <span class="zc">${semRec} sem recebimentos</span>` : ''}</h2>
+      ${porLoja.map(([l, x]) => x.n ? linhaPerda(l, x, maxLoja, `${plural(x.n, 'recebimento', 'recebimentos')} · `)
+        : `<div class="par zero"><div class="n rk"><span>${esc(l)}</span><b>—</b></div>${barra(0, 1)}<div class="v">sem recebimentos</div></div>`).join('')}</section>
+    ${vRanking('drpac', 'Itens em perda, por pacote', [...perdasPac].sort((a, b) => b[1] - a[1]))}
     ${isAdmin() ? `<button class="btn pri" style="margin-bottom:12px" onclick="exportarDr()">Exportar para Excel (${plural(lista.length, 'recebimento', 'recebimentos')})</button>` : ''}
     <h3 class="sec">Recebimentos · toque para ver o detalhe</h3>${lista.map(vDrItem).join('')}`;
 }
 function detalheDr(id) {
   const r = registros('divergencia_recebimento').find(x => x.id === id); if (!r) return;
-  const s = r.resumo || {}, linhas = drLinhas(r).filter(drLinhaDiv);
+  const s = drRes(r), linhas = drLinhas(r).filter(drLinhaDiv);
   const tipos = [['Volumosos', s.volumosos || {}], ...DR_TIPOS.map(([t, n]) => [n, s.tipos?.[t] || {}])];
-  abrirSheet(`<div class="res ${s.div ? 'imp' : ''}"><small>${esc(r.loja)} · ${fmtData(r.hora_inicio).slice(0, 10)}</small><div class="c">${fmtPct(s.pct || 0)} SKUs com divergência</div></div>
+  abrirSheet(`<div class="res ${s.skus_perda ? 'imp' : ''}"><small>${esc(r.loja)} · ${fmtData(r.hora_inicio).slice(0, 10)}</small><div class="c">${fmtPct(s.pct_perda_sku || 0)} SKUs com perda</div></div>
+    ${drKpis(s)}
     <dl class="kv"><dt>Horário</dt><dd>${fmtData(r.hora_inicio).slice(11)} – ${r.hora_fim ? fmtData(r.hora_fim).slice(11) : '?'}${s.duracao_min != null ? ` (${s.duracao_min} min)` : ''}</dd>
-      <dt>Registrado por</dt><dd>${esc(r.usuario)}</dd><dt>Informado no início</dt><dd>${r.n_marfinites ?? '—'} marfinites · ${r.n_volumosos ?? '—'} volumosos</dd>
-      <dt>SKUs</dt><dd>${s.div || 0} divergentes de ${s.skus || 0}</dd><dt>Unidades</dt><dd>${s.falta || 0} em falta · ${s.sobra || 0} a mais</dd>
-      <dt>Marfinites</dt><dd>${s.marf_real || 0} recebidos de ${s.marf_esp || 0} esperados</dd>
+      <dt>Registrado por</dt><dd>${esc(r.usuario)}</dd><dt>Esperado</dt><dd>${r.n_volumosos ?? '—'} volumosos · ${r.n_marfinites ?? '—'} marfinites</dd>
       ${r.obs ? `<dt>Observação</dt><dd>${esc(r.obs)}</dd>` : ''}<dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
-    <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Por tipo</h2>
-    <ul class="top3">${tipos.map(([n, x]) => `<li><span>${esc(n)}</span><b>${x.div || 0}/${x.skus || 0} · ${fmtPct(pct(x.div || 0, x.skus || 0))}</b></li>`).join('')}</ul>
+    <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Por tipo · SKUs com perda · itens em perda</h2>
+    <ul class="top3">${tipos.map(([n, x]) => `<li><span>${esc(n)}</span><b>${x.skus_perda || 0}/${x.skus || 0} · ${x.falta || 0}/${x.itens || 0}</b></li>`).join('')}</ul>
     ${linhas.length ? `<h2 style="font-size:15px;color:var(--mut);margin:14px 0 6px">Divergências (${linhas.length})</h2>
       <ul class="top3">${linhas.map(l => `<li><span>${esc(l.tipo)}${l.marf ? ' · Marf. ' + l.marf : ''}<br><span class="mut sm-t">${esc(l.pacote)}</span></span>
-        <b>${l.esperada} → ${l.real}</b></li>`).join('')}</ul>` : ''}
+        <b class="${l.real < l.esperada ? 'txmau' : ''}">${l.esperada} → ${l.real}</b></li>`).join('')}</ul>` : ''}
     <div style="margin-top:16px">${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('divergencia_recebimento','${esc(r.id)}')">Excluir recebimento</button>` : ''}
     <button class="btn sec" onclick="fecharSheet()">Fechar</button></div>`);
 }
@@ -1361,51 +1390,55 @@ async function exportarDr() {
   // Data como nº de série do Excel (sem hora nem fuso), formatada dd/mm/aaaa
   const dia = iso => { const d = new Date(iso); return (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 864e5; };
   const hm = iso => iso ? fmtData(iso).slice(11) : '';
-  const folha = (cab, linhas, pcts = [], datas = [1]) => {
+  const folha = (cab, linhas, datas = [1]) => {
     const ws = X.utils.aoa_to_sheet([cab, ...linhas]);
     ws['!cols'] = cab.map((h, i) => ({ wch: Math.max(10, Math.min(40, Math.max(String(h).length, ...linhas.map(l => String(l[i] ?? '').length)) + 2)) }));
     ws['!autofilter'] = { ref: X.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: linhas.length, c: cab.length - 1 } }) };
-    for (const c of pcts) for (let r = 1; r <= linhas.length; r++) { const cel = ws[X.utils.encode_cell({ r, c })]; if (cel && typeof cel.v === 'number') cel.z = '0.0%'; }
+    cab.forEach((h, c) => { if (!String(h).includes('%')) return;
+      for (let r = 1; r <= linhas.length; r++) { const cel = ws[X.utils.encode_cell({ r, c })]; if (cel && typeof cel.v === 'number') cel.z = '0.0%'; } });
     for (const c of datas) for (let r = 1; r <= linhas.length; r++) { const cel = ws[X.utils.encode_cell({ r, c })]; if (cel && typeof cel.v === 'number') cel.z = 'dd/mm/yyyy'; }
     return ws;
   };
+  // Bloco de indicadores repetido para o total e para cada tipo
+  const IND = ['SKUs esperados', 'Itens esperados', 'SKUs com divergência', 'SKUs com perda', 'Itens em perda', 'Itens a mais',
+               '% SKUs com divergência', '% SKUs com perda', '% itens com divergência', '% itens em perda'];
+  const ind = x => [x.skus, x.itens, x.div, x.skus_perda, x.falta, x.sobra, x.pct, x.pct_perda_sku, x.pct_itens_div, x.pct_itens_perda];
   const base = r => [r.id, dia(r.hora_inicio), r.loja, r.cluster];
   // 1. Recebimentos
-  const cabR = ['ID', 'Data', 'Loja', 'Cluster', 'Registrado por', 'Hora início', 'Hora fim', 'Duração (min)', 'Nº marfinites informado', 'Nº volumosos informado',
-    'SKUs esperados', 'SKUs com divergência', '% SKUs com divergência', 'Unidades em falta', 'Unidades a mais', 'Marfinites esperados', 'Marfinites recebidos', 'Marfinites em falta',
-    'Volumosos: SKUs', 'Volumosos: divergências', 'Volumosos: %',
-    ...DR_TIPOS.flatMap(([, n]) => { const c = n.replace('Marfinite ', ''); return [`${c}: marf. esperados`, `${c}: marf. recebidos`, `${c}: SKUs`, `${c}: divergências`, `${c}: %`]; }), 'Observação'];
-  const linR = lista.map(r => { const s = r.resumo || {}, v = s.volumosos || {};
-    return [...base(r), r.usuario, hm(r.hora_inicio), hm(r.hora_fim), s.duracao_min, r.n_marfinites, r.n_volumosos, s.skus, s.div, pct(s.div, s.skus), s.falta, s.sobra,
-      s.marf_esp, s.marf_real, s.marf_falta, v.skus, v.div, pct(v.div, v.skus),
-      ...DR_TIPOS.flatMap(([t]) => { const x = s.tipos?.[t] || {}; return [x.marf_esp, x.marf_real, x.skus, x.div, pct(x.div, x.skus)]; }), r.obs || ''];
+  const cabR = ['ID', 'Data', 'Loja', 'Cluster', 'Registrado por', 'Hora início', 'Hora fim', 'Duração (min)', 'Nº volumosos', 'Marfinites esperados', 'Marfinites recebidos', 'Marfinites em falta',
+    ...IND, ...IND.map(h => `Volumosos: ${h}`),
+    ...DR_TIPOS.flatMap(([t]) => { const c = DR_ROTULO[t]; return [`${c}: marf. esperados`, `${c}: marf. recebidos`, ...IND.map(h => `${c}: ${h}`)]; }), 'Observação'];
+  const linR = lista.map(r => { const s = drRes(r);
+    return [...base(r), r.usuario, hm(r.hora_inicio), hm(r.hora_fim), s.duracao_min, r.n_volumosos, s.marf_esp, s.marf_real, s.marf_falta,
+      ...ind(s), ...ind(s.volumosos), ...DR_TIPOS.flatMap(([t]) => { const x = s.tipos[t]; return [x.marf_esp, x.marf_real, ...ind(x)]; }), r.obs || ''];
   });
-  const pctR = cabR.map((h, i) => h.includes('%') ? i : -1).filter(i => i >= 0);
   // 2. Linhas de SKU
-  const cabL = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'Item nº', 'Pacote', 'Qtd. esperada', 'Qtd. real', 'Diferença (real − esperada)', 'Situação'];
+  const cabL = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'Item nº', 'Pacote', 'Qtd. esperada', 'Qtd. real', 'Diferença (real − esperada)', 'Itens em perda', 'Itens a mais', 'Situação'];
   const linL = lista.flatMap(r => drLinhas(r).map(l => [...base(r), l.tipo, l.marf, l.item, l.pacote, l.esperada, l.real, l.real - l.esperada,
-    l.real === l.esperada ? 'OK' : l.real < l.esperada ? 'Falta' : 'Sobra']));
+    Math.max(l.esperada - l.real, 0), Math.max(l.real - l.esperada, 0), l.real === l.esperada ? 'OK' : l.real < l.esperada ? 'Perda' : 'Sobra']));
   // 3. Marfinites
-  const cabM = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'SKUs esperados', 'SKUs com divergência', '% SKUs com divergência', 'Unidades em falta', 'Unidades a mais'];
+  const cabM = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'SKUs esperados', 'Itens esperados', 'SKUs com divergência', 'SKUs com perda', 'Itens em perda', 'Itens a mais',
+    '% SKUs com perda', '% itens em perda'];
   const linM = lista.flatMap(r => DR_TIPOS.flatMap(([t, n]) => (r.dados?.marf?.[t]?.caixas || []).map((c, i) => {
-    const dv = c.div.filter(drLinhaDiv).length; return [...base(r), n, i + 1, c.skus, dv, pct(dv, c.skus), drFalta(c.div), drSobra(c.div)]; })));
+    const x = drResumoLinhas(c.div, c.skus || 0, c.itens || 0);
+    return [...base(r), n, i + 1, c.skus, c.itens, x.div, x.skus_perda, x.falta, x.sobra, pct(x.skus_perda, x.skus), pct(x.falta, x.itens)]; })));
   // 4. Resumo por loja (inclui lojas sem recebimentos)
   const lojasU = drFiltros.loja ? [drFiltros.loja] : LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]);
-  const cabS = ['Loja', 'Cluster', 'Recebimentos', 'SKUs esperados', 'SKUs com divergência', '% SKUs com divergência', 'Unidades em falta', 'Unidades a mais', 'Marfinites esperados', 'Marfinites em falta', 'Duração média (min)'];
+  const cabS = ['Loja', 'Cluster', 'Recebimentos', ...IND, 'Marfinites esperados', 'Marfinites em falta', 'Duração média (min)'];
   const linS = lojasU.map(l => { const x = drSomar(lista.filter(r => r.loja === l));
-    return [l, CLUSTER_DE[l], x.n, x.skus, x.div, pct(x.div, x.skus), x.falta, x.sobra, x.marf_esp, x.marf_falta, x.nDur ? Math.round(x.dur / x.nDur) : '']; });
+    return [l, CLUSTER_DE[l], x.n, ...ind(x), x.marf_esp, x.marf_falta, x.nDur ? Math.round(x.dur / x.nDur) : '']; });
   // 5. Resumo por tipo
   const T = drSomar(lista);
-  const cabT = ['Tipo', 'SKUs esperados', 'SKUs com divergência', '% SKUs com divergência', 'Unidades em falta', 'Unidades a mais', 'Marfinites esperados', 'Marfinites recebidos', 'Marfinites em falta'];
-  const linT = [['Volumosos', T.vol.skus, T.vol.div, pct(T.vol.div, T.vol.skus), T.vol.falta, T.vol.sobra, '', '', ''],
-    ...DR_TIPOS.map(([t, n]) => { const x = T.tipos[t]; return [n, x.skus, x.div, pct(x.div, x.skus), x.falta, x.sobra, x.marf_esp, x.marf_real, x.marf_falta]; }),
-    ['TOTAL', T.skus, T.div, pct(T.div, T.skus), T.falta, T.sobra, T.marf_esp, T.marf_real, T.marf_falta]];
+  const cabT = ['Tipo', ...IND, 'Marfinites esperados', 'Marfinites recebidos', 'Marfinites em falta'];
+  const linT = [['Volumosos', ...ind(T.vol), '', '', ''],
+    ...DR_TIPOS.map(([t, n]) => { const x = T.tipos[t]; return [n, ...ind(x), x.marf_esp, x.marf_real, x.marf_falta]; }),
+    ['TOTAL', ...ind(T), T.marf_esp, T.marf_real, T.marf_falta]];
   const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, folha(cabR, linR, pctR), 'Recebimentos');
+  X.utils.book_append_sheet(wb, folha(cabR, linR), 'Recebimentos');
   X.utils.book_append_sheet(wb, folha(cabL, linL), 'Linhas SKU');
-  X.utils.book_append_sheet(wb, folha(cabM, linM, [8]), 'Marfinites');
-  X.utils.book_append_sheet(wb, folha(cabS, linS, [5], []), 'Resumo por loja');
-  X.utils.book_append_sheet(wb, folha(cabT, linT, [3], []), 'Resumo por tipo');
+  X.utils.book_append_sheet(wb, folha(cabM, linM), 'Marfinites');
+  X.utils.book_append_sheet(wb, folha(cabS, linS, []), 'Resumo por loja');
+  X.utils.book_append_sheet(wb, folha(cabT, linT, []), 'Resumo por tipo');
   X.writeFile(wb, `divergencias-recebimento_${hojeISO()}.xlsx`);
 }
 
