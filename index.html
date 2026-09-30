@@ -152,6 +152,8 @@ label.chk input{width:20px;height:20px}
 .passos .pic{flex:none;width:44px;height:44px;border-radius:12px;background:var(--soft);display:grid;place-items:center;font-size:22px}
 .passos b{display:block;font-size:16px;margin-bottom:2px}.passos p{margin:0;color:var(--mut);font-size:14px;line-height:1.45}
 .obr{font-weight:600;font-size:11px;color:#b42318;background:#fdecec;border-radius:999px;padding:2px 8px;margin-left:6px;text-transform:uppercase;letter-spacing:.03em}
+.par.zero .n{color:#b42318}.par.zero .bar{background:#fdecec}
+.zc{color:#b42318;font-weight:600}
 </style>
 </head>
 <body>
@@ -161,7 +163,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '3.4';
+const VERSAO = '3.5';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -1092,9 +1094,9 @@ function vPainel() {
       <div class="v">${n} · ${(n / causas.length * 100).toFixed(0)}% · acumulado ${(acum / causas.length * 100).toFixed(0)}%</div></div>`; }).join('')
       : '<div class="empty" style="padding:16px">Sem dados para mostrar.</div>'}
     ${inc ? `<p class="sm-t" style="color:var(--warn);margin:4px 0 0">⚠ ${plural(inc, 'inconsistência', 'inconsistências')} fora do Pareto.</p>` : ''}</section>
-  ${vRanking('cluster', 'Registros por cluster', contarPor(f, r => r.cluster))}
-  ${vRanking('loja', 'Registros por loja', contarPor(f, r => r.loja))}
-  ${vRanking('pacote', 'Registros por pacote', contarPor(f, r => r.pacote))}
+  ${vRanking('cluster', 'Registros por cluster', contarPor(f, r => r.cluster, universo('cluster')), Infinity)}
+  ${vRanking('loja', 'Registros por loja', contarPor(f, r => r.loja, universo('loja')), Infinity)}
+  ${vRanking('pacote', 'Registros por pacote', contarPor(f, r => r.pacote, universo('pacote')), Infinity)}
   ${vRanking('local', 'Outros locais onde o produto estava', contarPor(f.filter(r => r.local_encontrado), r => r.local_encontrado.trim()))}
   ${isAdmin() ? `<section class="card"><h2>Exportar para Excel</h2>
     <button class="btn pri" onclick="exportar(true)" ${f.length ? '' : 'disabled'}>Exportar filtrado (${f.length})</button>
@@ -1103,16 +1105,24 @@ function vPainel() {
     <p class="mut sm-t" style="margin:0 0 10px">CSV recebidos por WhatsApp antes da base de dados central. São enviados para a base (sem duplicar).</p>
     <button class="btn sec sm" onclick="$('#imp').click()">Importar arquivos CSV</button></section>` : ''}`;
 }
-function contarPor(recs, chave) {
-  const m = new Map(); recs.forEach(r => { const k = chave(r) || '—'; m.set(k, (m.get(k) || 0) + 1); });
+// Todos os clusters / lojas / pacotes que cabem nos filtros atuais — para mostrar também quem está a 0
+function universo(tipo) {
+  const { cluster, loja, pacote } = filtros;
+  if (tipo === 'cluster') return loja ? [CLUSTER_DE[loja]] : cluster ? [cluster] : CLUSTERS;
+  if (tipo === 'loja') return loja ? [loja] : LOJAS.filter(l => !cluster || l[1] === cluster).map(l => l[0]);
+  return pacote ? [pacote] : PACOTES;
+}
+function contarPor(recs, chave, todos = []) {
+  const m = new Map(todos.map(k => [k, 0])); recs.forEach(r => { const k = chave(r) || '—'; m.set(k, (m.get(k) || 0) + 1); });
   return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 let rankTodos = {};
 function vRanking(id, titulo, pares, limite = 8) {
   if (!pares.length) return '';
-  const max = pares[0][1], tot = pares.reduce((a, p) => a + p[1], 0), n = rankTodos[id] ? pares.length : limite;
-  return `<section class="card"><h2>${esc(titulo)}</h2>
-    ${pares.slice(0, n).map(([k, v]) => `<div class="par"><div class="n rk"><span>${esc(k)}</span><b>${v} <small class="mut">· ${(v / tot * 100).toFixed(0)}%</small></b></div>
+  const max = pares[0][1] || 1, tot = pares.reduce((a, p) => a + p[1], 0) || 1, n = rankTodos[id] ? pares.length : limite;
+  const zeros = pares.filter(p => !p[1]).length;
+  return `<section class="card"><h2>${esc(titulo)}${zeros ? ` · <span class="zc">${zeros} sem registros</span>` : ''}</h2>
+    ${pares.slice(0, n).map(([k, v]) => `<div class="par ${v ? '' : 'zero'}"><div class="n rk"><span>${esc(k)}</span><b>${v} <small class="mut">· ${(v / tot * 100).toFixed(0)}%</small></b></div>
       <div class="bar"><i style="width:${(v / max * 100).toFixed(1)}%"></i></div></div>`).join('')}
     ${pares.length > limite ? `<button class="btn ghost sm" onclick="rankTodos['${id}']=!rankTodos['${id}'];render()">${rankTodos[id] ? 'Mostrar menos' : `Ver todos (${pares.length})`}</button>` : ''}</section>`;
 }
