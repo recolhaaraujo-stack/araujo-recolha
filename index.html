@@ -188,7 +188,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.3';
+const VERSAO = '4.4';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -196,16 +196,23 @@ const LOJAS = [
   ['PRAÇA DA FEBEM','CIDADE INDUSTRIAL'],['PRAÇA TRABALHADORES','CIDADE INDUSTRIAL'],['SANTA MARIA','CIDADE INDUSTRIAL'],
   ['SHOPPING ITAU','CIDADE INDUSTRIAL'],['TIRADENTES','CIDADE INDUSTRIAL'],['TITO FULGENCIO','CIDADE INDUSTRIAL'],
   ['VIA DO MINERIO','CIDADE INDUSTRIAL'],['VISTA ALEGRE','CIDADE INDUSTRIAL'],['WAL MART','CIDADE INDUSTRIAL'],
-  ['AMAZONAS','GUTIERREZ'],['CUIABA','GUTIERREZ'],['FRANCISCO SA','GUTIERREZ'],['GUSTAVO AYALA','GUTIERREZ'],
-  ['GUTIERREZ','GUTIERREZ'],['JARDIM AMERICA','GUTIERREZ'],['NOVA SUISSA','GUTIERREZ'],['PÇA LEONARDO GUTIERR','GUTIERREZ'],
-  ['PRADO','GUTIERREZ'],['SILVA LOBO','GUTIERREZ'],['XAPURI','GUTIERREZ'],
   ['ALPHAVILLE','STOP CENTER - OURO PRETO'],['BAUXITA','STOP CENTER - OURO PRETO'],['CACHOEIRA DO CAMPO','STOP CENTER - OURO PRETO'],
   ['CENTRO OURO PRETO','STOP CENTER - OURO PRETO'],['ITABIRITO','STOP CENTER - OURO PRETO'],['ITABIRITO II','STOP CENTER - OURO PRETO'],
   ['NOVA LIMA','STOP CENTER - OURO PRETO'],['PONTO VERDE','STOP CENTER - OURO PRETO'],['SANTA CRUZ','STOP CENTER - OURO PRETO'],
   ['SERENA MALL','STOP CENTER - OURO PRETO'],['STOP CENTER','STOP CENTER - OURO PRETO'],
+  ['DIAMOND MALL','LOURDES'],['SUPER NOSSO','LOURDES'],['LOURDES','LOURDES'],
+  ['EXCELSIOR','LOURDES'],['PRUDENTE MORAIS','LOURDES'],['ANTÔNIO ARAUJO','LOURDES'],
+  ['SANTA CATARINA','LOURDES'],['PIO XII','LOURDES'],['MINAS I','LOURDES'],
+  ['SANTO ANTÔNIO','LOURDES'],['SÃO ROMÃO','LOURDES'],
 ];
-const CLUSTER_DE = Object.fromEntries(LOJAS);
+// Lojas que saíram do projeto mas têm registros antigos: só aparecem nos painéis, no cluster "Outras Lojas"
+const OUTRAS = 'OUTRAS LOJAS';
+const LOJAS_ANTIGAS = [['PRADO', OUTRAS]];
+const CLUSTER_DE = Object.fromEntries([...LOJAS, ...LOJAS_ANTIGAS]);
 const CLUSTERS = [...new Set(LOJAS.map(l => l[1]))];
+const CLUSTERS_FILTRO = [...CLUSTERS, OUTRAS];          // filtros dos painéis
+const LOJAS_FILTRO = [...LOJAS, ...LOJAS_ANTIGAS];
+const LOJA_ATIVA = new Set(LOJAS.map(l => l[0]));
 const PACOTES = ['ALIMENTOS','CONVENIENCIA','CUIDADO ADULTO','DERMOCOSMETICOS','HIGIENE PESSOAL','MEDIC CONS PAC',
   'MEDIC ESPECIAL','MEDIC RX EMAGRECEDOR E DIABETES','MEDIC RX GENERICO','MEDIC RX PROMOVIDO','MEDIC RX SIM TRADE',
   'MIP GENERICO','MIP MARCA','NUTRICAO SAUDAVEL','PERFUMARIA','PET CARE','UNIVERSO INFANTIL','VACINA HUMANA'];
@@ -928,7 +935,7 @@ function vTemposPainel() {
   const selP = `<select class="in" onchange="ttFiltros.processo=this.value;render()"><option value="">Todos os processos</option>
     ${[...procs].map(([k, p]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>`;
   const selL = isLoja() ? '' : `<select class="in" onchange="ttFiltros.loja=this.value;render()"><option value="">Todas as lojas</option>
-    ${LOJAS.map(l => `<option ${ttFiltros.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</select>`;
+    ${LOJAS_FILTRO.map(l => `<option ${ttFiltros.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</select>`;
   const lista = porData(ttFiltrar());
   let corpo;
   if (!sel) {
@@ -1544,8 +1551,8 @@ function drSetF(k, v) { drFiltros[k] = v; if (k === 'cluster' && drFiltros.loja 
 function vDrPainel() {
   const lista = porData(drFiltrar()), T = drSomar(lista);
   const sel = (k, opts, ph) => `<select class="in" onchange="drSetF('${k}',this.value)"><option value="">${ph}</option>${opts.map(o => `<option ${drFiltros[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-  const filtrosH = `<section class="card"><div class="g2">${sel('cluster', CLUSTERS, 'Todos os clusters')}
-      ${sel('loja', LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]), 'Todas as lojas')}
+  const filtrosH = `<section class="card"><div class="g2">${sel('cluster', CLUSTERS_FILTRO, 'Todos os clusters')}
+      ${sel('loja', LOJAS_FILTRO.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]), 'Todas as lojas')}
       <div class="g2c"><label>De<input class="in" type="date" value="${drFiltros.de}" onchange="drSetF('de',this.value)"></label>
         <label>Até<input class="in" type="date" value="${drFiltros.ate}" onchange="drSetF('ate',this.value)"></label></div></div></section>`;
   if (!lista.length) return filtrosH + '<div class="empty">Nenhum recebimento com estes filtros.</div>';
@@ -1554,7 +1561,7 @@ function vDrPainel() {
     <div class="v">${pre}${x.skus_perda} de ${x.skus} SKUs com perda · itens em perda ${fmtPct(x.pct_itens_perda)} (${x.falta} de ${x.itens}) · divergência ${fmtPct(x.pct)}</div></div>`;
   const tipos = [['Volumosos', T.vol], ...DR_TIPOS.map(([t, n]) => [n, T.tipos[t]])];
   const maxTipo = Math.max(...tipos.map(([, x]) => x.pct_perda_sku), 0.0001);
-  const lojasU = drFiltros.loja ? [drFiltros.loja] : LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]);
+  const lojasU = drFiltros.loja ? [drFiltros.loja] : [...new Set([...LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]), ...lista.map(r => r.loja)])];
   const porLoja = lojasU.map(l => [l, drSomar(lista.filter(r => r.loja === l))])
     .sort((a, b) => (b[1].n ? 1 : 0) - (a[1].n ? 1 : 0) || b[1].pct_perda_sku - a[1].pct_perda_sku || a[0].localeCompare(b[0]));
   const maxLoja = Math.max(...porLoja.map(([, x]) => x.pct_perda_sku), 0.0001), semRec = porLoja.filter(([, x]) => !x.n).length;
@@ -1636,7 +1643,7 @@ async function exportarDr() {
     const x = drResumoLinhas(c.div, c.skus || 0, c.itens || 0);
     return [...base(r), n, i + 1, c.codigo || '', c.skus, c.itens, x.div, x.skus_perda, x.falta, x.sobra, pct(x.skus_perda, x.skus), pct(x.falta, x.itens)]; })));
   // 4. Resumo por loja (inclui lojas sem recebimentos)
-  const lojasU = drFiltros.loja ? [drFiltros.loja] : LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]);
+  const lojasU = drFiltros.loja ? [drFiltros.loja] : [...new Set([...LOJAS.filter(l => !drFiltros.cluster || l[1] === drFiltros.cluster).map(l => l[0]), ...lista.map(r => r.loja)])];
   const cabS = ['Loja', 'Cluster', 'Recebimentos', ...IND, 'Marfinites esperados', 'Marfinites em falta', 'Duração média (min)'];
   const linS = lojasU.map(l => { const x = drSomar(lista.filter(r => r.loja === l));
     return [l, CLUSTER_DE[l], x.n, ...ind(x), x.marf_esp, x.marf_falta, x.nDur ? Math.round(x.dur / x.nDur) : '']; });
@@ -1727,11 +1734,11 @@ function causasFiltro() {
 function vFiltros() {
   const n = Object.values(filtros).filter(Boolean).length;
   const sel = (k, opts, ph) => `<select class="in" onchange="setF('${k}',this.value)"><option value="">${ph}</option>${opts.map(o => `<option ${filtros[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-  const lojas = LOJAS.filter(l => !filtros.cluster || l[1] === filtros.cluster).map(l => l[0]);
+  const lojas = LOJAS_FILTRO.filter(l => !filtros.cluster || l[1] === filtros.cluster).map(l => l[0]);
   return `<details class="card filt" ${filtrosAbertos ? 'open' : ''} ontoggle="filtrosAbertos=this.open">
     <summary><span>Filtros${n ? ` <span class="chip">${n} ativo${n > 1 ? 's' : ''}</span>` : ''}</span><span class="mut">▾</span></summary>
     <div class="g">
-      <div class="full">${sel('cluster', CLUSTERS, 'Todos os clusters')}</div>
+      <div class="full">${sel('cluster', CLUSTERS_FILTRO, 'Todos os clusters')}</div>
       <div class="full">${sel('loja', lojas, 'Todas as lojas')}</div>
       <div class="full">${sel('pacote', PACOTES, 'Todos os pacotes')}</div>
       <div class="full">${sel('causa', causasFiltro(), 'Todas as causas')}</div>
@@ -1745,7 +1752,7 @@ function vPainel() {
   const par = contar(causas), max = par[0]?.[1] || 1; let acum = 0;
   return `
   <section class="card hero"><h2>Base de dados central</h2><div class="big">${plural(todos.length, 'apontamento', 'apontamentos')}</div>
-    <p>${new Set(todos.map(r => r.loja)).size} de ${LOJAS.length} lojas já registraram</p>
+    <p>${new Set(todos.map(r => r.loja).filter(l => LOJA_ATIVA.has(l))).size} de ${LOJAS.length} lojas já registraram</p>
     <div class="row"><button class="btn light sm" onclick="sincronizar()">Atualizar</button>
     <button class="btn light sm" onclick="novo()">+ Novo</button></div></section>
   ${vFiltros()}
