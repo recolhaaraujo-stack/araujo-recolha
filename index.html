@@ -188,7 +188,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.4';
+const VERSAO = '4.5';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -1038,9 +1038,10 @@ const DR_ROTULO = { volumosos: 'Volumosos', termolabil: 'Termolábil', comum: 'C
 const DR_PASSOS = [
   ['🖨️', 'Prepare as folhas', 'Antes de começar, imprima as folhas de conferência do recebimento.'],
   ['🕐', 'Comece junto com o recebimento', 'Abra o acompanhamento assim que o recebimento começar: a hora de início fica registrada. No fim, registre a hora em que terminou.'],
-  ['📦', 'Informe o que deveria chegar', 'Informe o nº de volumosos (SKUs distintos, como água, refrigerante e fraldas) e o nº de marfinites esperados de cada tipo: termolábil, comum e controlado.'],
-  ['🔢', 'Confira por tipo, nesta ordem', 'Volumosos → marfinites termolábeis → marfinites comuns → marfinites controlados. Em cada tipo, registre quantos marfinites realmente chegaram.'],
-  ['🧮', 'Em cada marfinite, conte antes de conferir', 'Na folha do marfinite, conte o nº de SKUs distintos e o nº total de produtos esperados (use a calculadora). Depois confira o marfinite e registre só os produtos com divergência: pacote, quantidade esperada e quantidade real.'],
+  ['📦', 'Informe os marfinites esperados', 'Informe o nº de marfinites esperados de cada tipo: termolábil, comum e controlado.'],
+  ['🧃', 'Volumosos: conte e confira', 'Conte o nº de SKUs volumosos (água, refrigerante, fraldas…) e o total de itens esperados (use a calculadora). Confira e registre só os volumosos com divergência: SKU, quantidade esperada e quantidade real.'],
+  ['🔢', 'Marfinites por tipo, nesta ordem', 'Termolábil → comum → controlado. Em cada tipo, registre quantos marfinites realmente chegaram.'],
+  ['🧮', 'Em cada marfinite, conte antes de conferir', 'Na folha do marfinite, conte o nº de SKUs distintos e o total de itens esperados (use a calculadora). Confira e registre só os produtos com divergência: SKU, quantidade esperada e quantidade real.'],
   ['✅', 'Finalize', 'Registre a hora de fim, revise o resumo e salve.'],
 ];
 let drFlow = null;                       // { etapa, d } — d é o rascunho do recebimento em curso
@@ -1056,7 +1057,7 @@ const drTipoVazio = () => ({ esperada: null, real: null, caixas: [] });
 const caixaVazia = (id = uid(), ordem = Date.now()) => ({ id, ordem, codigo: '', skus: null, itens: null, div: [] });
 function drNovo() {
   return { id: uid(), criado_por: sessao.username, criado_em: new Date().toISOString(), loja: sessao.loja || store.get('rec_dr_loja', ''), n_marfinites: null, n_volumosos: null,
-           hora_inicio: horaAgora(), hora_fim: '', obs: '', volumosos: [],
+           hora_inicio: horaAgora(), hora_fim: '', obs: '', volumosos: [], vol: { skus: null, itens: null, div: [] },
            marf: { termolabil: drTipoVazio(), comum: drTipoVazio(), controlado: drTipoVazio() } };
 }
 
@@ -1078,7 +1079,9 @@ function drResumoLinhas(linhas, skus, itens) {
 const drPcts = x => ({ pct: pct(x.div, x.skus), pct_perda_sku: pct(x.skus_perda, x.skus),
                        pct_itens_div: pct((x.falta || 0) + (x.sobra || 0), x.itens), pct_itens_perda: pct(x.falta, x.itens) });
 function drResumo(d) {
-  const vol = drResumoLinhas(d.volumosos, d.volumosos.length, d.volumosos.reduce((a, l) => a + (l.esperada || 0), 0));
+  // Volumosos: formato novo (vol = nº de SKUs + total de itens + só as divergências) ou antigo (uma linha por volumoso)
+  const vol = d.vol ? drResumoLinhas(d.vol.div, d.vol.skus || 0, d.vol.itens || 0)
+                    : drResumoLinhas(d.volumosos || [], (d.volumosos || []).length, (d.volumosos || []).reduce((a, l) => a + (l.esperada || 0), 0));
   Object.assign(vol, drPcts(vol));
   const tipos = {};
   for (const [t] of DR_TIPOS) {
@@ -1099,10 +1102,18 @@ function drProblemas(d) {
   if (!d.loja) p.push('Loja');
   if (!d.hora_inicio) p.push('Hora de início');
   if (!d.hora_fim) p.push('Hora de fim');
-  d.volumosos.forEach((v, i) => {
-    const f = [!v.pacote && 'pacote', v.esperada == null && 'qtd. esperada', v.real == null && 'qtd. real'].filter(Boolean);
-    if (f.length) p.push(`Volumoso ${i + 1}: ${f.join(', ')}`);
-  });
+  const linhaProb = (l, nome) => {
+    const f = [!l.sku && !l.pacote && 'SKU', l.esperada == null && 'qtd. esperada', l.real == null && 'qtd. real'].filter(Boolean);
+    if (f.length) p.push(`${nome}: ${f.join(', ')}`);
+    else if (l.esperada === l.real) p.push(`${nome}: quantidades iguais (não é divergência)`);
+  };
+  if (d.vol) {
+    if (d.vol.skus == null) p.push('Volumosos: nº de SKUs esperados');
+    if (d.vol.itens == null) p.push('Volumosos: total de itens esperados');
+    if (d.vol.skus != null && d.vol.itens != null && d.vol.itens < d.vol.skus) p.push('Volumosos: o total de itens não pode ser menor que o nº de SKUs');
+    d.vol.div.forEach((l, j) => linhaProb(l, `Volumosos · divergência ${j + 1}`));
+    if (d.vol.skus != null && d.vol.div.length > d.vol.skus) p.push('Volumosos: mais divergências do que SKUs esperados');
+  }
   for (const [t] of DR_TIPOS) {
     const m = d.marf[t], curto = DR_ROTULO[t];
     if (m.esperada == null) p.push(`${curto}: nº de marfinites esperados (nos dados do recebimento)`);
@@ -1114,11 +1125,7 @@ function drProblemas(d) {
       if (c.skus == null) p.push(`${nome}: nº de SKUs esperados`);
       if (c.itens == null) p.push(`${nome}: total de itens esperados`);
       if (c.skus != null && c.itens != null && c.itens < c.skus) p.push(`${nome}: o total de itens não pode ser menor que o nº de SKUs`);
-      c.div.forEach((l, j) => {
-        const f = [!l.pacote && 'pacote', l.esperada == null && 'qtd. esperada', l.real == null && 'qtd. real'].filter(Boolean);
-        if (f.length) p.push(`${nome} · divergência ${j + 1}: ${f.join(', ')}`);
-        else if (l.esperada === l.real) p.push(`${nome} · divergência ${j + 1}: quantidades iguais (não é divergência)`);
-      });
+      c.div.forEach((l, j) => linhaProb(l, `${nome} · divergência ${j + 1}`));
       if (c.skus != null && c.div.length > c.skus) p.push(`${nome}: mais divergências do que SKUs esperados`);
     });
   }
@@ -1130,9 +1137,15 @@ function drProblemas(d) {
 //   remoto: o recebimento já existe na base de dados (partilhado)
 //   pend:   partes alteradas neste aparelho ainda por gravar
 const volVazio = (id = uid(), ordem = Date.now()) => ({ id, ordem, pacote: '', esperada: null, real: null });
-const linhaVazia = () => ({ pacote: '', esperada: null, real: null });
+const linhaVazia = () => ({ sku: '', esperada: null, real: null });
 function drMigrar(d) {   // rascunhos anteriores à partilha não tinham ids
-  d.volumosos.forEach((v, i) => { v.id ||= `v-${i + 1}`; v.ordem ??= i + 1; });
+  d.volumosos ||= [];
+  if (!d.vol) {   // formato antigo dos volumosos → um bloco só, com as divergências
+    const ls = d.volumosos;
+    d.vol = { skus: ls.length ? ls.length : (d.n_volumosos ?? null), itens: ls.length ? ls.reduce((a, l) => a + (l.esperada || 0), 0) : null,
+              div: ls.filter(drLinhaDiv).map(({ id, ordem, ...l }) => ({ sku: '', ...l })) };
+    d.volumosos = [];
+  }
   for (const [t] of DR_TIPOS) d.marf[t].caixas.forEach((c, i) => { c.id ||= `${t}-${i + 1}`; c.ordem ??= i + 1; if (!('itens' in c)) c.itens = null; if (!('codigo' in c)) c.codigo = ''; });
   d.criado_por ||= sessao.username;
   return d;
@@ -1149,6 +1162,7 @@ function drAbrir(continuar) {
   drPush(); drPull().catch(() => {});
 }
 function drSair(porVoltar) {
+  if (drFlow?.edicao && !porVoltar && !confirm('Sair sem salvar as alterações?')) return;
   drGuardar(); drFlow = null; if (!porVoltar) history.back(); render(); scrollTo(0, 0);
 }
 function drIr(etapa) {
@@ -1171,6 +1185,7 @@ document.addEventListener('focusout', () => setTimeout(() => { if (drFlow?.rende
 // Que parte do recebimento um campo altera
 function drChaveDe(c) {
   const d = drFlow.d;
+  if (c[0] === 'vol') return 'volm';
   if (c[0] === 'volumosos') return 'vol:' + d.volumosos[c[1]].id;
   if (c[0] === 'marf' && c[2] === 'real') return 'real:' + c[1];
   if (c[0] === 'marf' && c[2] === 'caixas') return 'cx:' + d.marf[c[1]].caixas[c[3]].id;
@@ -1180,7 +1195,7 @@ let drRev = 0;
 function drMarcar(chave) { drFlow.pend[chave] = ++drRev; drGuardar(); drAgendarPush(); }
 function drTudoPendente() {
   const d = drFlow.d;
-  ['cab', ...DR_TIPOS.map(([t]) => 'real:' + t), ...d.volumosos.map(v => 'vol:' + v.id),
+  ['cab', 'volm', ...DR_TIPOS.map(([t]) => 'real:' + t), ...d.volumosos.map(v => 'vol:' + v.id),
    ...DR_TIPOS.flatMap(([t]) => d.marf[t].caixas.map(c => 'cx:' + c.id))].forEach(k => { drFlow.pend[k] = ++drRev; });
 }
 function drSet(caminho, valor, redesenhar) {
@@ -1192,6 +1207,7 @@ function drItemDados(chave) {
   const d = drFlow.d;
   if (chave === 'cab') return { loja: d.loja, n_volumosos: d.n_volumosos, hora_inicio: d.hora_inicio, hora_fim: d.hora_fim, obs: d.obs,
                                 criado_em: d.criado_em, criado_por: d.criado_por, esperadas: Object.fromEntries(DR_TIPOS.map(([t]) => [t, d.marf[t].esperada])) };
+  if (chave === 'volm') return { ...d.vol };
   if (chave.startsWith('real:')) return { real: d.marf[chave.slice(5)].real };
   if (chave.startsWith('vol:')) { const v = d.volumosos.find(x => x.id === chave.slice(4)); return v ? { ...v } : { apagado: true }; }
   for (const [t] of DR_TIPOS) { const c = d.marf[t].caixas.find(x => x.id === chave.slice(3)); if (c) return { ...c, tipo: t }; }
@@ -1210,7 +1226,8 @@ function drAplicarItem(chave, x) {
   if (chave === 'cab') {
     for (const k of ['loja', 'n_volumosos', 'hora_inicio', 'hora_fim', 'obs', 'criado_em', 'criado_por']) if (x[k] !== undefined) d[k] = x[k];
     for (const [t] of DR_TIPOS) if (x.esperadas && t in x.esperadas) d.marf[t].esperada = x.esperadas[t];
-  } else if (chave.startsWith('real:')) { d.marf[chave.slice(5)].real = x.real; drGarantirCaixas(chave.slice(5)); }
+  } else if (chave === 'volm') d.vol = { skus: x.skus ?? null, itens: x.itens ?? null, div: x.div || [] };
+  else if (chave.startsWith('real:')) { d.marf[chave.slice(5)].real = x.real; drGarantirCaixas(chave.slice(5)); }
   else if (chave.startsWith('vol:')) {
     const id = chave.slice(4); d.volumosos = d.volumosos.filter(v => v.id !== id);
     if (!x.apagado) { d.volumosos.push({ ...x, id }); d.volumosos.sort(porOrdem); }
@@ -1220,7 +1237,7 @@ function drAplicarItem(chave, x) {
   }
 }
 const drGuardar = () => {
-  if (drFlow && DR_ETAPAS.indexOf(drFlow.etapa) >= 2)
+  if (drFlow && !drFlow.edicao && DR_ETAPAS.indexOf(drFlow.etapa) >= 2)
     store.set(drKey(), { ...drFlow.d, etapa: drFlow.etapa, _s: { remoto: drFlow.remoto, pend: drFlow.pend, vers: drFlow.vers, cursor: drFlow.cursor } });
 };
 
@@ -1232,7 +1249,7 @@ function drPush() {
   drPushando = (async () => {
     await 0;   // garante que drPushando já está atribuído antes de o finally o limpar
     try {
-      while (drFlow && DR_ETAPAS.indexOf(drFlow.etapa) >= 2 && navigator.onLine) {
+      while (drFlow && !drFlow.edicao && DR_ETAPAS.indexOf(drFlow.etapa) >= 2 && navigator.onLine) {
         const f = drFlow, chaves = Object.keys(f.pend);
         if (f.remoto && !chaves.length) break;
         f.st = 'guardando'; drAtualizarPartilha();
@@ -1281,6 +1298,7 @@ setInterval(() => { if (drFlow && document.visibilityState === 'visible') { drPu
 addEventListener('online', () => { if (drFlow) { drPush(); drPull().catch(() => {}); } });
 function drTextoPartilha() {
   const f = drFlow; if (!f) return '';
+  if (f.edicao) return '✏️ Edição pelo administrador · as alterações só ficam gravadas ao salvar';
   if (!f.remoto) return navigator.onLine ? 'A preparar a partilha…' : 'Sem internet: fica guardado neste aparelho até haver conexão';
   const outros = (f.participantes || []).filter(n => n !== sessao.nome);
   const quem = outros.length ? `👥 Com ${outros.join(', ')}` : '👥 Partilhado · outras pessoas podem juntar-se';
@@ -1290,6 +1308,8 @@ function drTextoPartilha() {
 function drAtualizarPartilha() { const el = $('#drpart'); if (el) el.textContent = drTextoPartilha(); }
 
 // ── Volumosos e marfinites ──
+function drAddDivVol() { drFlow.d.vol.div.push(linhaVazia()); drMarcar('volm'); drRender(); }
+function drRemDivVol(j) { drFlow.d.vol.div.splice(j, 1); drMarcar('volm'); drRender(); }
 function drAddVol() { const v = volVazio(); drFlow.d.volumosos.push(v); drMarcar('vol:' + v.id); drRender(); }
 function drRemVol(i) {
   if (!confirm(`Remover o Volumoso ${i + 1}?`)) return;
@@ -1310,11 +1330,11 @@ function drRemCaixa(t, i) {
 }
 function drAddDiv(t, i) { const c = drFlow.d.marf[t].caixas[i]; c.div.push(linhaVazia()); drMarcar('cx:' + c.id); drRender(); }
 function drRemDiv(t, i, j) { const c = drFlow.d.marf[t].caixas[i]; c.div.splice(j, 1); drMarcar('cx:' + c.id); drRender(); }
-const drDadosOk = d => !!(d.loja && d.n_volumosos != null && DR_TIPOS.every(([t]) => d.marf[t].esperada != null) && d.hora_inicio);
+const drDadosOk = d => !!(d.loja && DR_TIPOS.every(([t]) => d.marf[t].esperada != null) && d.hora_inicio);
 function drIniciarConferencia() {
   const d = drFlow.d; if (!drDadosOk(d)) return;
   d.n_marfinites = DR_TIPOS.reduce((a, [t]) => a + d.marf[t].esperada, 0);
-  for (let k = d.volumosos.length + 1; d.volumosos.length < d.n_volumosos; k++) d.volumosos.push(volVazio(`v-${k}`, k));
+  if (drFlow.edicao) return drIr('volumosos');
   store.set('rec_dr_loja', d.loja);
   drFlow.etapa = 'volumosos'; drTudoPendente(); drIr('volumosos'); drPush();
 }
@@ -1365,8 +1385,8 @@ function drBadge(l) {
 }
 function drCamposLinha(base, l) {
   const cam = k => JSON.stringify([...base, k]).replace(/"/g, "'");
-  return `<select class="in" onchange="drSet(${cam('pacote')},this.value,true)"><option value="">Pacote…</option>
-      ${PACOTES.map(p => `<option ${l.pacote === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
+  return `<input class="in" placeholder="SKU (código do produto)" autocapitalize="characters" value="${esc(l.sku || '')}" oninput="drSet(${cam('sku')},this.value.trim())" onchange="drRender()">
+    ${l.pacote ? `<p class="mut sm-t" style="margin:6px 2px 0">Pacote (registro antigo): ${esc(l.pacote)}</p>` : ''}
     <div class="g2c"><label>Qtd. esperada<input class="in" inputmode="numeric" value="${vNum(l.esperada)}" placeholder="0"
         oninput="this.value=this.value.replace(/\\D/g,'');drSet(${cam('esperada')},numOuNull(this.value))" onchange="drRender()"></label>
       <label>Qtd. real<input class="in" inputmode="numeric" value="${vNum(l.real)}" placeholder="0"
@@ -1397,7 +1417,7 @@ function drKpis(x, extra = '') {
 function vDrFlow() {
   const d = drFlow.d, e = drFlow.etapa, i = DR_ETAPAS.indexOf(e);
   const head = `<header class="top"><button onclick="drPasso(-1)">‹</button>
-    <div class="t" style="text-align:center"><h1>Recebimento</h1><small>${esc(d.loja || 'Selecione a loja')}${i >= 2 ? ' · início ' + esc(d.hora_inicio) : ''}</small></div>
+    <div class="t" style="text-align:center"><h1>${drFlow.edicao ? 'Editar recebimento' : 'Recebimento'}</h1><small>${esc(d.loja || 'Selecione a loja')}${i >= 2 ? ' · início ' + esc(d.hora_inicio) : ''}</small></div>
     <button onclick="drSair()" aria-label="Fechar">✕</button></header>`;
   const passos = i >= 2 ? `<div class="partilha" id="drpart">${esc(drTextoPartilha())}</div><div class="drsteps">${DR_ETAPAS.slice(2).map((k, n) => `<button class="${k === e ? 'on' : ''}" onclick="drIr('${k}')"><b>${n + 1}</b>${DR_ROTULO[k]}</button>`).join('')}</div>` : '';
   let corpo;
@@ -1408,7 +1428,6 @@ function vDrFlow() {
   } else if (e === 'dados') {
     corpo = `<div class="step">Dados do recebimento</div><div class="q">O que deveria chegar?</div>
       <div class="fld"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(d.loja, "drSet(['loja'],this.value,true)")}</div>
-      <div class="fld"><label class="f">Nº de volumosos <span style="font-weight:400">(SKUs volumosos distintos)</span></label>${drNumInput(['n_volumosos'], d.n_volumosos)}</div>
       <label class="f">Nº de marfinites esperados</label>
       <div class="card" style="padding:12px 14px">${DR_TIPOS.map(([t]) => `<div class="marfrow"><span>${DR_PLURAL[t]}</span>${drNumInput(['marf', t, 'esperada'], d.marf[t].esperada)}</div>`).join('')}
         <p class="mut sm-t" style="margin:8px 0 0">Total: ${DR_TIPOS.reduce((a, [t]) => a + (d.marf[t].esperada || 0), 0)} marfinites. Na conferência de cada tipo você informa só quantos realmente chegaram.</p></div>
@@ -1416,13 +1435,17 @@ function vDrFlow() {
       <p class="mut sm-t">A data de hoje fica registrada automaticamente. A hora de fim é registrada no final da conferência.</p>
       <div style="margin-top:auto;padding-top:12px"><button class="btn pri" onclick="drIniciarConferencia()" ${drDadosOk(d) ? '' : 'disabled'}>Iniciar conferência</button></div>`;
   } else if (e === 'volumosos') {
-    const r = drResumo(d).volumosos;
+    const r = drResumo(d).volumosos, v = d.vol;
     corpo = `${passos}<div class="step">Etapa 1 de 5</div><div class="q">Volumosos</div>
-      <div class="hint">Cada volumoso é um SKU (ex.: água, refrigerante, fraldas). Para cada um, informe o pacote, a quantidade que deveria ter chegado e a quantidade que realmente chegou.</div>
-      <p class="drsum">${plural(r.skus, 'volumoso', 'volumosos')} · ${r.itens} itens esperados · <b class="${r.skus_perda ? 'txmau' : ''}">${r.skus_perda} com perda</b>${r.div - r.skus_perda ? ` · ${r.div - r.skus_perda} com sobra` : ''}</p>
-      ${d.volumosos.map((v, k) => `<section class="card drit"><div class="drh"><b>Volumoso ${k + 1}</b>${drBadge(v)}<button class="x" onclick="drRemVol(${k})" aria-label="Remover">✕</button></div>
-        ${drCamposLinha(['volumosos', k], v)}</section>`).join('') || '<div class="empty" style="padding:14px">Nenhum volumoso. Se não chegou nenhum, avance.</div>'}
-      <button class="btn sec" onclick="drAddVol()">Registrar +1 Volumoso</button>${drNav()}`;
+      <div class="hint">Conte o nº de SKUs volumosos (água, refrigerante, fraldas…) e o total de itens esperados (use a calculadora). Depois confira e registre só os volumosos com divergência: SKU, quantidade esperada e quantidade real.</div>
+      <section class="card drit"><div class="drh"><b>Volumosos esperados</b>${v.skus != null && v.itens != null ? `<span class="bdg ${r.div ? 'mau' : 'ok'}">${r.div ? plural(r.div, 'divergência', 'divergências') : '✓ sem divergência'}</span>` : '<span class="bdg">a preencher</span>'}</div>
+        <div class="g2c" style="margin-top:0"><label>Nº de SKUs esperados${drNumInput(['vol', 'skus'], v.skus)}</label>
+          <label>Total de itens esperados${drNumInput(['vol', 'itens'], v.itens)}</label></div>
+        ${v.div.map((l, j) => `<div class="drdiv"><div class="drh"><span>Divergência ${j + 1}</span>${drBadge(l)}<button class="x" onclick="drRemDivVol(${j})" aria-label="Remover">✕</button></div>
+          ${drCamposLinha(['vol', 'div', j], l)}</div>`).join('')}
+        <button class="btn ghost sm" onclick="drAddDivVol()">Registrar +1 Divergência</button></section>`;
+    corpo += `<p class="drsum">${r.skus} SKUs · ${r.itens} itens esperados · <b class="${r.falta ? 'txmau' : ''}">${r.falta} ${r.falta === 1 ? 'item' : 'itens'} em perda</b>${r.sobra ? ` · ${r.sobra} a mais` : ''}</p>`;
+    corpo += drNav();
   } else if (e !== 'fim') {
     const t = e, nome = DR_TIPOS.find(x => x[0] === t)[1], m = d.marf[t], r = drResumo(d).tipos[t];
     const nMarf = m.esperada != null && m.real != null ? (m.real < m.esperada ? `<span class="bdg mau">Faltam ${m.esperada - m.real}</span>` : m.real > m.esperada ? `<span class="bdg aviso">Sobram ${m.real - m.esperada}</span>` : '<span class="bdg ok">✓ OK</span>') : '';
@@ -1452,7 +1475,7 @@ function vDrFlow() {
       <div class="fld"><label class="f">Observação <span style="font-weight:400">(opcional)</span></label>
         <textarea class="in" rows="3" placeholder="Algo fora do normal neste recebimento?" oninput="drSet(['obs'],this.value)">${esc(d.obs)}</textarea></div>
       ${prob.length ? `<section class="card probs"><h2>Falta preencher (${prob.length})</h2><ul>${prob.map(x => `<li>${esc(x)}</li>`).join('')}</ul></section>` : ''}
-      <button class="btn pri" onclick="drFinalizar()" ${prob.length ? 'disabled' : ''}>Finalizar e salvar</button>
+      <button class="btn pri" onclick="drFinalizar()" ${prob.length ? 'disabled' : ''}>${drFlow.edicao ? 'Salvar alterações' : 'Finalizar e salvar'}</button>
       <button class="btn sec" onclick="drPasso(-1)">‹ Voltar à conferência</button>`;
   }
   return `<div class="flow">${head}<main class="wrap">${corpo}</main></div>`;
@@ -1468,12 +1491,13 @@ function drRegistro(d) {
   const ini = drIso(d.criado_em, d.hora_inicio), fim = drIso(d.criado_em, d.hora_fim, ini);
   d.n_marfinites = DR_TIPOS.reduce((a, [t]) => a + (d.marf[t].esperada || 0), 0);
   return { id: d.id, criado_em: ini, loja: d.loja, cluster: CLUSTER_DE[d.loja], hora_inicio: ini, hora_fim: fim,
-           n_marfinites: d.n_marfinites, n_volumosos: d.n_volumosos, dados: { volumosos: d.volumosos, marf: d.marf },
+           n_marfinites: d.n_marfinites, n_volumosos: d.vol?.skus ?? d.n_volumosos, dados: { vol: d.vol, volumosos: d.volumosos || [], marf: d.marf },
            resumo: drResumo(d), obs: (d.obs || '').trim(), usuario: sessao.nome, versao: VERSAO };
 }
 function drFechar() { store.del(drKey()); drFlow = null; history.back(); tab = 'inicio'; render(); scrollTo(0, 0); toast('Recebimento salvo ✓'); sincronizar(); }
 async function drFinalizar() {
   const f = drFlow, d = f.d; if (drProblemas(d).length) return;
+  if (f.edicao) return drSalvarEdicao();
   // Nunca chegou à base de dados e sem internet: guarda para enviar depois, como antes
   if (!f.remoto && !navigator.onLine) { if (guardarNaFila('divergencia_recebimento', drRegistro(d))) drFechar(); return; }
   if (!navigator.onLine) return alert('Sem internet. Para finalizar um recebimento partilhado é preciso conexão. Os dados continuam guardados neste aparelho.');
@@ -1492,9 +1516,31 @@ async function drFinalizar() {
   drFechar();
 }
 
+// ── Edição de um recebimento gravado (só admin) ──
+function drEditar(id) {
+  const r = registros('divergencia_recebimento').find(x => x.id === id); if (!r || !isAdmin()) return;
+  if (drFlow) return alert('Feche primeiro a conferência em andamento.');
+  const dd = JSON.parse(JSON.stringify(r.dados || {})), vazio = () => ({ esperada: null, real: null, caixas: [] });
+  const d = { id: r.id, criado_por: '', criado_em: r.hora_inicio, loja: r.loja, n_marfinites: r.n_marfinites, n_volumosos: r.n_volumosos,
+              hora_inicio: fmtData(r.hora_inicio).slice(11), hora_fim: r.hora_fim ? fmtData(r.hora_fim).slice(11) : '', obs: r.obs || '',
+              volumosos: dd.volumosos || [], vol: dd.vol, marf: { termolabil: vazio(), comum: vazio(), controlado: vazio(), ...(dd.marf || {}) } };
+  drMigrar(d); fecharSheet();
+  drFlow = { etapa: 'volumosos', d, edicao: true, remoto: false, pend: {}, vers: {}, cursor: null, participantes: [], st: '' };
+  history.pushState({ dr: 1 }, ''); render(); scrollTo(0, 0);
+}
+async function drSalvarEdicao() {
+  const d = drFlow.d, reg = drRegistro(d); delete reg.usuario;
+  const b = [...document.querySelectorAll('#app button')].find(x => x.textContent.startsWith('Salvar alterações')); if (b) { b.disabled = true; b.textContent = 'Salvando…'; }
+  try { if (!await rpc('dr_atualizar', { p_token: sessao.token, p_registro: reg })) throw new Error('Recebimento não encontrado.'); }
+  catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); drRender(); return alert('Não foi possível salvar. ' + msgErro(e)); }
+  const c = cache.divergencia_recebimento || [], i = c.findIndex(x => x.id === reg.id);
+  if (i >= 0) { c[i] = { ...c[i], ...reg }; store.set(cacheKey('divergencia_recebimento'), c); }
+  drFlow = null; history.back(); tab = 'registros'; render(); toast('Recebimento atualizado ✓'); sincronizar();
+}
+
 // ── Ecrã inicial da ferramenta ──
 // Resumo de um registro, recalculado a partir dos dados (registros da v4.0 não tinham o total de itens)
-const drRes = r => r.dados?.volumosos ? drResumo({ ...r.dados, hora_inicio: r.hora_inicio ? fmtData(r.hora_inicio).slice(11) : '', hora_fim: r.hora_fim ? fmtData(r.hora_fim).slice(11) : '' }) : (r.resumo || {});
+const drRes = r => (r.dados?.volumosos || r.dados?.vol) ? drResumo({ ...r.dados, hora_inicio: r.hora_inicio ? fmtData(r.hora_inicio).slice(11) : '', hora_fim: r.hora_fim ? fmtData(r.hora_fim).slice(11) : '' }) : (r.resumo || {});
 function vDrItem(r) {
   const s = drRes(r);
   return `<button class="item" onclick="detalheDr('${esc(r.id)}')">
@@ -1544,6 +1590,7 @@ function drSomar(lista) {
 function drLinhas(r) {
   const d = r.dados || {}, out = [];
   (d.volumosos || []).forEach((l, i) => out.push({ tipo: 'Volumoso', marf: '', item: i + 1, ...l }));
+  (d.vol?.div || []).forEach((l, i) => out.push({ tipo: 'Volumoso', marf: '', item: i + 1, ...l }));
   for (const [t, nome] of DR_TIPOS) (d.marf?.[t]?.caixas || []).forEach((c, i) => c.div.forEach((l, j) => out.push({ tipo: nome, marf: i + 1, cod: c.codigo || '', item: j + 1, ...l })));
   return out;
 }
@@ -1565,14 +1612,14 @@ function vDrPainel() {
   const porLoja = lojasU.map(l => [l, drSomar(lista.filter(r => r.loja === l))])
     .sort((a, b) => (b[1].n ? 1 : 0) - (a[1].n ? 1 : 0) || b[1].pct_perda_sku - a[1].pct_perda_sku || a[0].localeCompare(b[0]));
   const maxLoja = Math.max(...porLoja.map(([, x]) => x.pct_perda_sku), 0.0001), semRec = porLoja.filter(([, x]) => !x.n).length;
-  const perdasPac = new Map(); lista.flatMap(drLinhas).filter(drLinhaPerda).forEach(l => perdasPac.set(l.pacote, (perdasPac.get(l.pacote) || 0) + l.esperada - l.real));
+  const perdasPac = new Map(); lista.flatMap(drLinhas).filter(drLinhaPerda).forEach(l => { const k = l.sku || `sem SKU (${l.pacote || '?'})`; perdasPac.set(k, (perdasPac.get(k) || 0) + l.esperada - l.real); });
   return `${filtrosH}
     ${drKpis(T, `<div class="kpi"><b>${T.n}</b><span>recebimentos</span><small>${T.nDur ? 'duração média ' + Math.round(T.dur / T.nDur) + ' min' : ''}</small></div>`)}
     <section class="card"><h2>% SKUs com perda, por tipo</h2>${tipos.map(([n, x]) => linhaPerda(n, x, maxTipo)).join('')}</section>
     <section class="card"><h2>% SKUs com perda, por loja${semRec ? ` · <span class="zc">${semRec} sem recebimentos</span>` : ''}</h2>
       ${porLoja.map(([l, x]) => x.n ? linhaPerda(l, x, maxLoja, `${plural(x.n, 'recebimento', 'recebimentos')} · `)
         : `<div class="par zero"><div class="n rk"><span>${esc(l)}</span><b>—</b></div>${barra(0, 1)}<div class="v">sem recebimentos</div></div>`).join('')}</section>
-    ${vRanking('drpac', 'Itens em perda, por pacote', [...perdasPac].sort((a, b) => b[1] - a[1]))}
+    ${vRanking('drpac', 'Itens em perda, por SKU', [...perdasPac].sort((a, b) => b[1] - a[1]))}
     ${isAdmin() ? `<button class="btn pri" style="margin-bottom:12px" onclick="exportarDr()">Exportar para Excel (${plural(lista.length, 'recebimento', 'recebimentos')})</button>` : ''}
     <h3 class="sec">Recebimentos · toque para ver o detalhe</h3>${lista.map(vDrItem).join('')}`;
 }
@@ -1588,9 +1635,10 @@ function detalheDr(id) {
     <h2 style="font-size:15px;color:var(--mut);margin:0 0 6px">Por tipo · SKUs com perda · itens em perda</h2>
     <ul class="top3">${tipos.map(([n, x]) => `<li><span>${esc(n)}</span><b>${x.skus_perda || 0}/${x.skus || 0} · ${x.falta || 0}/${x.itens || 0}</b></li>`).join('')}</ul>
     ${linhas.length ? `<h2 style="font-size:15px;color:var(--mut);margin:14px 0 6px">Divergências (${linhas.length})</h2>
-      <ul class="top3">${linhas.map(l => `<li><span>${esc(l.tipo)}${l.marf ? ' · Marf. ' + l.marf + (l.cod ? ' (' + esc(l.cod) + ')' : '') : ''}<br><span class="mut sm-t">${esc(l.pacote)}</span></span>
+      <ul class="top3">${linhas.map(l => `<li><span>${esc(l.tipo)}${l.marf ? ' · Marf. ' + l.marf + (l.cod ? ' (' + esc(l.cod) + ')' : '') : ''}<br><span class="mut sm-t">${l.sku ? 'SKU ' + esc(l.sku) : esc(l.pacote || '')}</span></span>
         <b class="${l.real < l.esperada ? 'txmau' : ''}">${l.esperada} → ${l.real}</b></li>`).join('')}</ul>` : ''}
-    <div style="margin-top:16px">${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('divergencia_recebimento','${esc(r.id)}')">Excluir recebimento</button>` : ''}
+    <div style="margin-top:16px">${isAdmin() ? `<button class="btn sec" onclick="drEditar('${esc(r.id)}')">✏️ Editar recebimento</button>` : ''}
+    ${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('divergencia_recebimento','${esc(r.id)}')">Excluir recebimento</button>` : ''}
     <button class="btn sec" onclick="fecharSheet()">Fechar</button></div>`);
 }
 
@@ -1633,8 +1681,8 @@ async function exportarDr() {
       ...ind(s), ...ind(s.volumosos), ...DR_TIPOS.flatMap(([t]) => { const x = s.tipos[t]; return [x.marf_esp, x.marf_real, ...ind(x)]; }), r.obs || ''];
   });
   // 2. Linhas de SKU
-  const cabL = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'Código marfinite', 'Item nº', 'Pacote', 'Qtd. esperada', 'Qtd. real', 'Diferença (real − esperada)', 'Itens em perda', 'Itens a mais', 'Situação'];
-  const linL = lista.flatMap(r => drLinhas(r).map(l => [...base(r), l.tipo, l.marf, l.cod || '', l.item, l.pacote, l.esperada, l.real, l.real - l.esperada,
+  const cabL = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'Código marfinite', 'Item nº', 'SKU', 'Pacote (registros antigos)', 'Qtd. esperada', 'Qtd. real', 'Diferença (real − esperada)', 'Itens em perda', 'Itens a mais', 'Situação'];
+  const linL = lista.flatMap(r => drLinhas(r).map(l => [...base(r), l.tipo, l.marf, l.cod || '', l.item, l.sku || '', l.pacote || '', l.esperada, l.real, l.real - l.esperada,
     Math.max(l.esperada - l.real, 0), Math.max(l.real - l.esperada, 0), l.real === l.esperada ? 'OK' : l.real < l.esperada ? 'Perda' : 'Sobra']));
   // 3. Marfinites
   const cabM = ['ID recebimento', 'Data', 'Loja', 'Cluster', 'Tipo', 'Marfinite nº', 'Código marfinite', 'SKUs esperados', 'Itens esperados', 'SKUs com divergência', 'SKUs com perda', 'Itens em perda', 'Itens a mais',
