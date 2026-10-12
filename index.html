@@ -188,7 +188,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.5';
+const VERSAO = '4.6';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -1031,16 +1031,16 @@ async function excluirProcesso(id) {
 }
 
 // ── Divergências de Estoque no Recebimento ─────────────────────────────
-const DR_TIPOS = [['termolabil', 'Marfinite Termolábil'], ['comum', 'Marfinite Comum'], ['controlado', 'Marfinite Controlado']];
+const DR_TIPOS = [['termolabil', 'Marfinite Termolábil'], ['controlado', 'Marfinite Controlado'], ['comum', 'Marfinite Comum']];   // ordem do padrão da loja
 const DR_PLURAL = { termolabil: 'Marfinites termolábeis', comum: 'Marfinites comuns', controlado: 'Marfinites controlados' };
-const DR_ETAPAS = ['padrao', 'dados', 'volumosos', 'termolabil', 'comum', 'controlado', 'fim'];
+const DR_ETAPAS = ['padrao', 'dados', 'volumosos', 'termolabil', 'controlado', 'comum', 'fim'];
 const DR_ROTULO = { volumosos: 'Volumosos', termolabil: 'Termolábil', comum: 'Comum', controlado: 'Controlado', fim: 'Finalizar' };
 const DR_PASSOS = [
   ['🖨️', 'Prepare as folhas', 'Antes de começar, imprima as folhas de conferência do recebimento.'],
   ['🕐', 'Comece junto com o recebimento', 'Abra o acompanhamento assim que o recebimento começar: a hora de início fica registrada. No fim, registre a hora em que terminou.'],
   ['📦', 'Informe os marfinites esperados', 'Informe o nº de marfinites esperados de cada tipo: termolábil, comum e controlado.'],
   ['🧃', 'Volumosos: conte e confira', 'Conte o nº de SKUs volumosos (água, refrigerante, fraldas…) e o total de itens esperados (use a calculadora). Confira e registre só os volumosos com divergência: SKU, quantidade esperada e quantidade real.'],
-  ['🔢', 'Marfinites por tipo, nesta ordem', 'Termolábil → comum → controlado. Em cada tipo, registre quantos marfinites realmente chegaram.'],
+  ['🔢', 'Marfinites por tipo, nesta ordem', 'Termolábil → controlado → comum. Em cada tipo, registre quantos marfinites realmente chegaram. Antes dos comuns, coloque cada folha dentro do seu marfinite.'],
   ['🧮', 'Em cada marfinite, conte antes de conferir', 'Na folha do marfinite, conte o nº de SKUs distintos e o total de itens esperados (use a calculadora). Confira e registre só os produtos com divergência: SKU, quantidade esperada e quantidade real.'],
   ['✅', 'Finalize', 'Registre a hora de fim, revise o resumo e salve.'],
 ];
@@ -1466,7 +1466,7 @@ function vDrFlow() {
           ${drCamposLinha(['marf', t, 'caixas', k, 'div', j], l)}</div>`).join('')}
         <button class="btn ghost sm" onclick="drAddDiv('${t}',${k})">Registrar +1 Divergência</button></section>`; }).join('')
         || `<div class="empty" style="padding:14px">${m.real == null ? 'Informe quantos marfinites chegaram para abrir a conferência de cada um.' : 'Nenhum marfinite deste tipo.'}</div>`}
-      <button class="btn sec" onclick="drAddCaixa('${t}')">Registrar +1 Marfinite</button>${drNav(t === 'controlado' ? 'Finalizar' : 'Próximo')}`;
+      <button class="btn sec" onclick="drAddCaixa('${t}')">Registrar +1 Marfinite</button>${drNav(t === 'comum' ? 'Finalizar' : 'Próximo')}`;
   } else {
     const r = drResumo(d), prob = drProblemas(d);
     corpo = `${passos}<div class="step">Etapa 5 de 5</div><div class="q">Finalizar recebimento</div>
