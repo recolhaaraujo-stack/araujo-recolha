@@ -139,6 +139,9 @@ details.grp[open] summary{margin-bottom:8px}
 .stepper{display:flex;gap:10px}.stepper .btn{flex:0 0 64px;font-size:26px;padding:10px}.stepper .in{flex:1;text-align:center;font-size:26px;font-weight:700}
 .pu{text-align:center;font-weight:600;color:var(--kb2);min-height:22px;margin:4px 0 10px}
 .g2{display:grid;gap:10px}
+.gch{display:flex;gap:6px;overflow-x:auto;margin:4px -2px 14px;padding:2px;scrollbar-width:none}
+.gch button{flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 12px;font:inherit;font-size:14px;font-weight:600;color:var(--mut);cursor:pointer}
+.gch button small{opacity:.7;font-weight:600}.gch button.on{background:var(--kb);border-color:var(--kb);color:#fff}
 .como{background:var(--soft);border-radius:12px;padding:12px 14px;margin-top:4px}
 .como b{color:var(--kb);font-size:14px}.como p{margin:4px 0 10px;white-space:pre-line;font-size:15px}
 .rk{display:flex;justify-content:space-between;gap:10px}.rk b{white-space:nowrap}
@@ -188,7 +191,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.6';
+const VERSAO = '4.7';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -343,6 +346,7 @@ const msgErro = e => ERROS[e.message] || (/fetch|network|Failed/i.test(e.message
 const FERRAMENTAS = {
   apontamento_falta: { nome: 'Apontamento de Falta', desc: 'Mapear a causa raiz de uma falta no clique e retire.', icone: 'lupa', rpc: 'af' },
   recolha_tempos:    { nome: 'Tomada de Tempos', desc: 'Cronometrar um processo e registrar as unidades.', icone: 'relogio', rpc: 'tt' },
+  ritmo_farma:       { nome: 'Ritmo - Farma', desc: 'Cronometrar as tarefas e os atendimentos do farmacêutico.', icone: 'farma', rpc: 'rf' },
   divergencia_recebimento: { nome: 'Divergências no Recebimento', desc: 'Conferir o recebimento e registrar as divergências de estoque.', icone: 'caixa', rpc: 'dr' },
 };
 const PERFIS = { loja: 'Loja', consultor: 'Consultor', admin: 'Admin' };
@@ -365,7 +369,7 @@ let filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' };
 let ttFiltros = { processo: '', loja: '' };
 const salvarFila = () => store.set('rec_fila', fila);
 const cacheKey = k => `rec_cache_${k}_${sessao.username}`;
-const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); processos = store.get(`rec_tt_proc_${sessao.username}`, []); };
+const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); procs = {}; for (const k in TEMPOS) procs[k] = store.get(procKey(k), []); };
 const minhaFila = k => fila.filter(r => r._dono === sessao.username && (!k || r._tool === k));
 function registros(k) {
   const c = cache[k] || [], ids = new Set(c.map(r => r.id));
@@ -403,6 +407,7 @@ const IC = {
   plus: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   caixa: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5l9 4.5 9-4.5M12 12v9"/></svg>',
   lupa: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
+  farma: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
   relogio: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>',
   gear: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
   users: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .8 3.2 2.6 3.6 5.2"/></svg>',
@@ -421,7 +426,7 @@ function textoSync() {
 }
 function atualizarSync() { const el = $('#sync'); if (el) el.textContent = textoSync(); }
 // Não redesenhar por baixo de quem está a preencher um formulário
-const emEdicao = () => flow || drFlow || (tela === 'recolha_tempos' && tab === 'inicio') || $('#sheet').classList.contains('on');
+const emEdicao = () => flow || drFlow || (ehTempos(tela) && tab === 'inicio') || $('#sheet').classList.contains('on');
 async function sincronizar() {
   if (!sessao || sincronizando) return;
   if (!navigator.onLine) { sync.estado = 'offline'; atualizarSync(); return; }
@@ -435,7 +440,7 @@ async function sincronizar() {
         fila = fila.filter(r => !(r._dono === sessao.username && r._tool === k && ok.has(r.id))); salvarFila();
         if (res.erro.length) console.warn('Registros recusados pelo servidor:', res.erro);
       }
-      if (k === 'recolha_tempos') await carregarProcessos();
+      if (ehTempos(k)) await carregarProcessos(k);
       if (k === 'divergencia_recebimento') drAbertas = await rpc('dr_sessoes_abertas', { p_token: sessao.token });
       cache[k] = await rpc(`${p}_listar`, { p_token: sessao.token }); store.set(cacheKey(k), cache[k]);
     }
@@ -477,11 +482,12 @@ function render() {
     tabs = [['inicio', 'Recebimento', IC.plus], ['registros', 'Painel', IC.chart]];
     corpo = tab === 'inicio' ? vDrInicio() : vDrPainel();
   } else {
+    tt = ttDe(tela);
     tabs = [['inicio', 'Registrar', IC.plus], ['registros', 'Painel', IC.chart], ...(isAdmin() ? [['processos', 'Processos', IC.gear]] : [])];
     corpo = tab === 'inicio' ? vTempos() : tab === 'processos' && isAdmin() ? vProcessos() : vTemposPainel();
   }
   app.innerHTML = shell(voltar ? f.nome : sessao.nome, voltar ? sessao.nome : (CLUSTER_DE[sessao.loja] || f.nome), corpo, tabs, voltar);
-  if (tela === 'recolha_tempos' && tab === 'inicio') ttTick();
+  if (ehTempos(tela) && tab === 'inicio') ttTick();
 }
 function shell(titulo, sub, corpo, tabs, voltar) {
   return `<header class="top">${voltar ? `<button onclick="irTela('home')" aria-label="Início">‹</button>` : ''}
@@ -827,17 +833,36 @@ function gravar() {
   tab = 'inicio'; sairFluxo(); toast('Apontamento salvo ✓'); sincronizar();
 }
 
-// ── Tomada de Tempos ───────────────────────────────────────────────────
-let processos = [];   // do servidor: { id, nome, unidade, descricao, ativo } — criados pelo admin
-const procDe = id => processos.find(p => p.id === id);
-const procAtivos = () => processos.filter(p => p.ativo);
+// ── Tomada de Tempos e Ritmo - Farma (o mesmo cronómetro, cada um com os seus processos) ──
+const RF_GRUPOS = [['atendimento', 'Atendimentos'], ['diaria', 'Diárias'], ['semanal', 'Semanais'], ['mensal', 'Mensais'],
+  ['periodica', 'Trim. / sem. / anuais'], ['demanda', 'Sob demanda'], ['sem', 'Sem frequência']];
+const TEMPOS = {
+  recolha_tempos: { rpc: 'tt', arquivo: 'tomada-tempos' },
+  ritmo_farma: { rpc: 'rf', arquivo: 'ritmo-farma', grupos: RF_GRUPOS, executores: ['Farmacêutico', 'Estagiário farma', 'Liderança', 'Outro'], unPadrao: '1' },
+};
+const ehTempos = k => !!TEMPOS[k];
+const ttK = () => ehTempos(tela) ? tela : 'recolha_tempos';
+const ttCfg = () => TEMPOS[ttK()];
+const nomeGrupo = g => RF_GRUPOS.find(x => x[0] === g)?.[1] || 'Outros';
+let procs = {};   // { ferramenta: [{ id, nome, unidade, descricao, ativo, grupo, frequencia, responsavel }] } — criados pelo admin
+const P = () => procs[ttK()] || [];
+const procDe = id => P().find(p => p.id === id);
+const procAtivos = () => P().filter(p => p.ativo);
 const chaveProc = r => r.processo_id || 'nome:' + r.processo;
 const minusc = s => s ? s[0].toLowerCase() + s.slice(1) : s;
 const rotuloUn = unidade => unidade ? `Nº de ${minusc(unidade)}` : 'Unidades';
-const procKey = () => `rec_tt_proc_${sessao.username}`;
-async function carregarProcessos() { processos = await rpc('tt_processos_listar', { p_token: sessao.token }); store.set(procKey(), processos); }
-const ttUltimo = store.get('rec_tt_ultimo', {});
-let tt = { processo: ttUltimo.processo || '', loja: ttUltimo.loja || '', acum: 0, t0: null, unidades: '', obs: '' };
+const procKey = k => `rec_${TEMPOS[k].rpc}_proc_${sessao.username}`;
+async function carregarProcessos(k) { procs[k] = await rpc(`${TEMPOS[k].rpc}_processos_listar`, { p_token: sessao.token }); store.set(procKey(k), procs[k]); }
+const ttEstados = {};
+function ttDe(k) {
+  if (!ttEstados[k]) {
+    const c = TEMPOS[k], u = store.get(`rec_${c.rpc}_ultimo`, {});
+    ttEstados[k] = { processo: u.processo || '', loja: u.loja || '', grupo: u.grupo || c.grupos?.[0][0] || '', executor: u.executor || '',
+                     acum: 0, t0: null, unidades: c.unPadrao || '', obs: '' };
+  }
+  return ttEstados[k];
+}
+let tt = ttDe('recolha_tempos');   // estado da ferramenta de tempos aberta
 const ttSegundos = () => tt.acum + (tt.t0 ? (Date.now() - tt.t0) / 1000 : 0);
 let ttTimer = null;
 function ttTick() {
@@ -864,25 +889,33 @@ function ttValidar() {
   b.disabled = !(procDe(tt.processo)?.ativo && (sessao.loja || tt.loja) && s > 0 && u > 0);
   $('#ttpu').textContent = s > 0 && u > 0 ? `${num1(s / u)} s por unidade` : '';
 }
-function ttGuardarUltimo() { store.set('rec_tt_ultimo', { processo: tt.processo, loja: tt.loja }); }
+function ttGuardarUltimo() { store.set(`rec_${ttCfg().rpc}_ultimo`, { processo: tt.processo, loja: tt.loja, grupo: tt.grupo, executor: tt.executor }); }
+function ttGrupo(g) { tt.grupo = g; if (procDe(tt.processo)?.grupo !== g) tt.processo = ''; ttGuardarUltimo(); render(); }
+function ttExecutor(x) { tt.executor = tt.executor === x ? '' : x; ttGuardarUltimo(); render(); }
 // Estatísticas de uma lista de tomadas
 function estatTt(l) {
   const n = l.length, t = l.reduce((a, r) => a + Number(r.tempo_seg), 0), u = l.reduce((a, r) => a + Number(r.unidades), 0);
   const pu = l.map(r => r.tempo_seg / r.unidades);
   return { n, t, u, porUn: u ? t / u : 0, mediaUn: n ? u / n : 0, mediaT: n ? t / n : 0, min: n ? Math.min(...pu) : 0, max: n ? Math.max(...pu) : 0 };
 }
+const chipsProc = p => [`Unidade de medida: ${p.unidade}`, p.frequencia, p.responsavel && `Responsável: ${p.responsavel}`]
+  .filter(Boolean).map(t => `<span class="chip">${esc(t)}</span>`).join(' ');
 
 function vTempos() {
-  const ativos = procAtivos();
+  const cfg = ttCfg(), k = ttK(), ativos = procAtivos();
   if (!ativos.length) return `<div class="empty">Ainda não há processos criados.<br><br>${isAdmin()
     ? `<button class="btn pri sm" onclick="irTab('processos')">Criar o primeiro processo</button>` : 'Peça ao admin para criar os processos.'}</div>`;
-  const p = procDe(tt.processo)?.ativo ? procDe(tt.processo) : null;
+  const grupos = cfg.grupos?.filter(([g]) => ativos.some(p => p.grupo === g));
+  if (grupos && !grupos.some(([g]) => g === tt.grupo)) tt.grupo = grupos[0][0];
+  const lista = grupos ? ativos.filter(p => p.grupo === tt.grupo) : ativos;
+  const p = lista.find(x => x.id === tt.processo) || null;
   const s = ttSegundos(), m = Math.floor(s / 60);
-  const est = p ? estatTt(registros('recolha_tempos').filter(r => r.processo_id === p.id)) : null;
+  const est = p ? estatTt(registros(k).filter(r => r.processo_id === p.id)) : null;
   return `<section class="card">
+      ${grupos ? `<label class="f">Frequência</label><div class="gch">${grupos.map(([g, l]) => `<button class="${tt.grupo === g ? 'on' : ''}" onclick="ttGrupo('${g}')">${esc(l)} <small>${ativos.filter(x => x.grupo === g).length}</small></button>`).join('')}</div>` : ''}
       <div class="fld"><label class="f">Processo</label><select class="in" onchange="tt.processo=this.value;ttGuardarUltimo();render()">
-        <option value="">Selecione…</option>${ativos.map(x => `<option value="${esc(x.id)}" ${p?.id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>
-      ${p ? `<div class="como"><b>Como acompanhar</b><p>${esc(p.descricao || 'Sem descrição.')}</p><span class="chip">Unidade de medida: ${esc(p.unidade)}</span></div>` : ''}
+        <option value="">Selecione…</option>${lista.map(x => `<option value="${esc(x.id)}" ${p?.id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>
+      ${p ? `<div class="como"><b>Como acompanhar</b><p>${esc(p.descricao || 'Sem descrição.')}</p>${chipsProc(p)}</div>` : ''}
       <div class="fld" style="margin:14px 0 0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
     </section>
     <section class="card crono">
@@ -899,8 +932,10 @@ function vTempos() {
       <div class="stepper"><button class="btn sec" onclick="ttUn(-1)">−</button>
         <input class="in" id="ttu" inputmode="numeric" value="${esc(tt.unidades)}" placeholder="0" oninput="tt.unidades=this.value.replace(/\\D/g,'');this.value=tt.unidades;ttValidar()">
         <button class="btn sec" onclick="ttUn(1)">+</button></div>
+      ${cfg.executores ? `<div class="fld" style="margin:14px 0 0"><label class="f">Quem executou <span style="font-weight:400">(opcional)</span></label>
+        <div class="gch">${cfg.executores.map(x => `<button class="${tt.executor === x ? 'on' : ''}" onclick="ttExecutor('${esc(x)}')">${esc(x)}</button>`).join('')}</div></div>` : ''}
       <div class="fld" style="margin:14px 0 0"><label class="f">Observação <span style="font-weight:400">(opcional)</span></label>
-        <input class="in" value="${esc(tt.obs)}" placeholder="Algo fora do normal?" oninput="tt.obs=this.value"></div>
+        <input class="in" value="${esc(tt.obs)}" placeholder="${cfg.grupos ? 'Onde começou e acabou? Algo fora do normal?' : 'Algo fora do normal?'}" oninput="tt.obs=this.value"></div>
     </section>
     <p class="pu" id="ttpu"></p>
     <button class="btn pri" id="ttsalvar" onclick="ttSalvar()" disabled>Salvar tomada de tempo</button>
@@ -909,43 +944,56 @@ function vTempos() {
 }
 function ttSalvar() {
   if (tt.t0) { tt.acum = ttSegundos(); tt.t0 = null; }
-  const p = procDe(tt.processo), loja = sessao.loja || tt.loja, seg = Math.round(tt.acum * 10) / 10, un = parseInt(tt.unidades) || 0;
+  const k = ttK(), cfg = ttCfg(), p = procDe(tt.processo), loja = sessao.loja || tt.loja, seg = Math.round(tt.acum * 10) / 10, un = parseInt(tt.unidades) || 0;
   if (!p?.ativo || !loja || seg <= 0 || un <= 0) return;
   const r = { id: uid(), criado_em: new Date().toISOString(), loja, cluster: CLUSTER_DE[loja], processo_id: p.id, processo: p.nome, unidade: p.unidade,
-              tempo_seg: seg, unidades: un, obs: tt.obs.trim(), usuario: sessao.nome };
-  if (!guardarNaFila('recolha_tempos', r)) return;
-  tt.acum = 0; tt.unidades = ''; tt.obs = '';
+              tempo_seg: seg, unidades: un, obs: tt.obs.trim(), usuario: sessao.nome,
+              ...(cfg.grupos ? { grupo: p.grupo, executor: tt.executor } : {}) };
+  if (!guardarNaFila(k, r)) return;
+  tt.acum = 0; tt.unidades = cfg.unPadrao || ''; tt.obs = '';
   render(); scrollTo(0, 0); toast(`Salvo ✓ ${fmtTempo(seg)} · ${un} ${minusc(p.unidade)}`); sincronizar();
 }
 function vTtItem(r) {
   return `<button class="item" onclick="detalheTt('${esc(r.id)}')">
     <div class="l1"><span>${fmtData(r.criado_em)}${r._pendente ? ' · <span class="pend">aguardando envio</span>' : ''}</span><span>${esc(r.loja)}</span></div>
     <div class="l2">${esc(r.processo)}</div>
-    <span class="chip">${fmtTempo(r.tempo_seg)} · ${r.unidades} ${esc(minusc(r.unidade || 'unidades'))} · ${num1(r.tempo_seg / r.unidades)} s/un</span></button>`;
+    <span class="chip">${fmtTempo(r.tempo_seg)} · ${r.unidades} ${esc(minusc(r.unidade || 'unidades'))} · ${num1(r.tempo_seg / r.unidades)} s/un${r.executor ? ' · ' + esc(r.executor) : ''}</span></button>`;
 }
-function ttFiltrar() { return registros('recolha_tempos').filter(r => (!ttFiltros.processo || chaveProc(r) === ttFiltros.processo) && (!ttFiltros.loja || r.loja === ttFiltros.loja)); }
+function ttFiltrar() { return registros(ttK()).filter(r => (!ttFiltros.processo || chaveProc(r) === ttFiltros.processo) && (!ttFiltros.loja || r.loja === ttFiltros.loja)); }
 // Processos que aparecem no painel: os criados pelo admin + os que só existem nos registros (antigos)
 function procsPainel() {
-  const m = new Map(processos.map(p => [p.id, { nome: p.nome, unidade: p.unidade }]));
-  registros('recolha_tempos').forEach(r => { const k = chaveProc(r); if (!m.has(k)) m.set(k, { nome: r.processo, unidade: r.unidade || 'Unidades' }); });
+  const m = new Map(P().map(p => [p.id, { nome: p.nome, unidade: p.unidade, grupo: p.grupo, ativo: p.ativo }]));
+  registros(ttK()).forEach(r => { const k = chaveProc(r); if (!m.has(k)) m.set(k, { nome: r.processo, unidade: r.unidade || 'Unidades', grupo: r.grupo }); });
   return m;
 }
 function vTemposPainel() {
-  const procs = procsPainel(), sel = ttFiltros.processo && procs.has(ttFiltros.processo) ? ttFiltros.processo : '';
+  const cfg = ttCfg(), pm = procsPainel(), sel = ttFiltros.processo && pm.has(ttFiltros.processo) ? ttFiltros.processo : '';
+  const opc = ([k, p]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(p.nome)}</option>`;
   const selP = `<select class="in" onchange="ttFiltros.processo=this.value;render()"><option value="">Todos os processos</option>
-    ${[...procs].map(([k, p]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select>`;
+    ${cfg.grupos ? cfg.grupos.map(([g, l]) => { const x = [...pm].filter(([, p]) => p.grupo === g); return x.length ? `<optgroup label="${esc(l)}">${x.map(opc).join('')}</optgroup>` : ''; }).join('')
+      : [...pm].map(opc).join('')}</select>`;
   const selL = isLoja() ? '' : `<select class="in" onchange="ttFiltros.loja=this.value;render()"><option value="">Todas as lojas</option>
     ${LOJAS_FILTRO.map(l => `<option ${ttFiltros.loja === l[0] ? 'selected' : ''}>${esc(l[0])}</option>`).join('')}</select>`;
   const lista = porData(ttFiltrar());
   let corpo;
   if (!sel) {
-    const cards = [...procs].map(([k, p]) => ({ k, p, e: estatTt(lista.filter(r => chaveProc(r) === k)) })).filter(x => x.e.n);
-    corpo = cards.length ? `<h3 class="sec">Escolha um processo</h3>${cards.map(({ k, p, e }) => `<button class="tool" onclick="ttFiltros.processo='${esc(k)}';render();scrollTo(0,0)">
+    const todos = [...pm].map(([k, p]) => ({ k, p, e: estatTt(lista.filter(r => chaveProc(r) === k)) }));
+    const cartao = ({ k, p, e }) => `<button class="tool" onclick="ttFiltros.processo='${esc(k)}';render();scrollTo(0,0)">
         <span class="lg">${IC.relogio}</span><span class="tx"><b>${esc(p.nome)}</b><span>${plural(e.n, 'tomada', 'tomadas')} · ${e.u} ${esc(minusc(p.unidade))}</span>
-        <small>${num1(e.porUn)} s por unidade</small></span><span class="go">›</span></button>`).join('')}`
-      : '<div class="empty">Nenhuma tomada de tempo ainda.</div>';
+        <small>${num1(e.porUn)} s por unidade</small></span><span class="go">›</span></button>`;
+    if (cfg.grupos) {
+      // Por frequência: quantos processos já têm tomadas, para ver o que falta acompanhar
+      corpo = cfg.grupos.map(([g, l]) => {
+        const x = todos.filter(c => c.p.grupo === g && (c.p.ativo !== false || c.e.n)); if (!x.length) return '';
+        const com = x.filter(c => c.e.n);
+        return `<h3 class="sec">${esc(l)} · ${com.length} de ${x.length} com tomadas</h3>${com.map(cartao).join('')}`;
+      }).join('') || '<div class="empty">Nenhum processo ainda.</div>';
+    } else {
+      const cards = todos.filter(x => x.e.n);
+      corpo = cards.length ? `<h3 class="sec">Escolha um processo</h3>${cards.map(cartao).join('')}` : '<div class="empty">Nenhuma tomada de tempo ainda.</div>';
+    }
   } else {
-    const p = procs.get(sel), e = estatTt(lista);
+    const p = pm.get(sel), e = estatTt(lista);
     const porLoja = [...new Set(lista.map(r => r.loja))].map(l => [l, estatTt(lista.filter(r => r.loja === l))]).sort((a, b) => b[1].porUn - a[1].porUn);
     const maxL = porLoja[0]?.[1].porUn || 1;
     corpo = !e.n ? '<div class="empty">Sem tomadas para este processo com estes filtros.</div>' : `
@@ -969,42 +1017,52 @@ function vTemposPainel() {
   return `<section class="card"><div class="g2">${selP}${selL}</div></section>${corpo}`;
 }
 function detalheTt(id) {
-  const r = registros('recolha_tempos').find(x => x.id === id); if (!r) return;
+  const k = ttK(), r = registros(k).find(x => x.id === id); if (!r) return;
   abrirSheet(`<div class="res"><small>${esc(r.processo)}</small><div class="c">${fmtTempo(r.tempo_seg)} · ${r.unidades} ${esc(minusc(r.unidade || 'unidades'))}</div></div>
     <dl class="kv"><dt>Por unidade</dt><dd>${num1(r.tempo_seg / r.unidades)} s</dd><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd>
-      <dt>Loja</dt><dd>${esc(r.loja)}</dd><dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
+      <dt>Loja</dt><dd>${esc(r.loja)}</dd>${r.grupo ? `<dt>Frequência</dt><dd>${esc(nomeGrupo(r.grupo))}</dd>` : ''}
+      ${r.executor ? `<dt>Quem executou</dt><dd>${esc(r.executor)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
       ${r.obs ? `<dt>Observação</dt><dd>${esc(r.obs)}</dd>` : ''}<dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
-    ${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('recolha_tempos','${esc(r.id)}')">Excluir registro</button>` : '<p class="mut sm-t">Só quem registrou (ou o admin) pode excluir.</p>'}
+    ${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('${k}','${esc(r.id)}')">Excluir registro</button>` : '<p class="mut sm-t">Só quem registrou (ou o admin) pode excluir.</p>'}
     <button class="btn sec" onclick="fecharSheet()">Fechar</button>`);
 }
 function exportarTt() {
   if (!isAdmin()) return;
+  const cfg = ttCfg(), rf = !!cfg.grupos;
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', n2 = v => String(v).replace('.', ',');
-  const cols = ['id', 'data_hora', 'loja', 'cluster', 'processo', 'unidade_medida', 'tempo_seg', 'tempo_mm_ss', 'unidades', 'seg_por_unidade', 'obs', 'usuario'];
-  const linhas = porData(ttFiltrar()).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, r.processo, r.unidade, n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades,
-    n2((r.tempo_seg / r.unidades).toFixed(2)), r.obs, r.usuario].map(q).join(';'));
-  baixar('﻿' + [cols.join(';'), ...linhas].join('\r\n'), `tomada-tempos_${hojeISO()}.csv`);
+  const cols = ['id', 'data_hora', 'loja', 'cluster', ...(rf ? ['frequencia'] : []), 'processo', 'unidade_medida', 'tempo_seg', 'tempo_mm_ss', 'unidades', 'seg_por_unidade',
+                ...(rf ? ['quem_executou'] : []), 'obs', 'usuario'];
+  const linhas = porData(ttFiltrar()).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, ...(rf ? [nomeGrupo(r.grupo)] : []), r.processo, r.unidade,
+    n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades, n2((r.tempo_seg / r.unidades).toFixed(2)), ...(rf ? [r.executor] : []), r.obs, r.usuario].map(q).join(';'));
+  baixar('﻿' + [cols.join(';'), ...linhas].join('\r\n'), `${cfg.arquivo}_${hojeISO()}.csv`);
 }
 
-// ── Processos da Tomada de Tempos (admin) ──────────────────────────────
+// ── Processos da Tomada de Tempos e do Ritmo - Farma (admin) ───────────
 function vProcessos() {
-  const n = id => registros('recolha_tempos').filter(r => r.processo_id === id).length;
-  return `<button class="btn pri" style="margin-bottom:14px" onclick="abrirProcesso(null)">+ Novo processo</button>
-    ${processos.length ? processos.map(p => `<button class="item" onclick="abrirProcesso('${esc(p.id)}')">
-      <div class="l1"><span>${esc(p.unidade)}</span><span>${p.ativo ? '' : '<span class="pend">inativo</span>'}</span></div>
-      <div class="l2">${esc(p.nome)}</div><span class="chip">${plural(n(p.id), 'registro', 'registros')}</span></button>`).join('')
-      : '<div class="empty">Nenhum processo criado.</div>'}
+  const cfg = ttCfg(), n = id => registros(ttK()).filter(r => r.processo_id === id).length;
+  const item = p => `<button class="item" onclick="abrirProcesso('${esc(p.id)}')">
+      <div class="l1"><span>${esc([p.frequencia, p.unidade].filter(Boolean).join(' · '))}</span><span>${p.ativo ? '' : '<span class="pend">inativo</span>'}</span></div>
+      <div class="l2">${esc(p.nome)}</div><span class="chip">${plural(n(p.id), 'registro', 'registros')}</span></button>`;
+  const lista = !P().length ? '<div class="empty">Nenhum processo criado.</div>' : cfg.grupos
+    ? cfg.grupos.map(([g, l]) => { const x = P().filter(p => p.grupo === g); return x.length ? `<h3 class="sec">${esc(l)} (${x.length})</h3>${x.map(item).join('')}` : ''; }).join('')
+    : P().map(item).join('');
+  return `<button class="btn pri" style="margin-bottom:14px" onclick="abrirProcesso(null)">+ Novo processo</button>${lista}
     <p class="mut sm-t" style="margin:10px 4px">Os consultores só podem escolher processos ativos. Um processo com registros não é apagado: fica inativo e o histórico mantém-se.</p>`;
 }
 let procEd = null;
 function abrirProcesso(id) {
-  const p = id ? procDe(id) : null;
-  procEd = { id: p?.id || null, nome: p?.nome || '', unidade: p?.unidade || '', descricao: p?.descricao || '', ativo: p ? p.ativo : true };
+  const cfg = ttCfg(), p = id ? procDe(id) : null;
+  procEd = { id: p?.id || null, nome: p?.nome || '', unidade: p?.unidade || '', descricao: p?.descricao || '', ativo: p ? p.ativo : true,
+             grupo: p?.grupo || (cfg.grupos ? tt.grupo || cfg.grupos[0][0] : ''), frequencia: p?.frequencia || '', responsavel: p?.responsavel || '' };
   abrirSheet(`<h2 class="sh">${p ? 'Editar processo' : 'Novo processo'}</h2>
+    ${cfg.grupos ? `<div class="fld"><label class="f">Aba (frequência)</label><select class="in" onchange="procEd.grupo=this.value">
+      ${cfg.grupos.map(([g, l]) => `<option value="${g}" ${procEd.grupo === g ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>` : ''}
     <div class="fld"><label class="f">Nome do processo</label><input class="in" value="${esc(procEd.nome)}" placeholder="Ex.: Troca de etiquetas" oninput="procEd.nome=this.value"></div>
     <div class="fld"><label class="f">Unidade de medida</label><input class="in" value="${esc(procEd.unidade)}" placeholder="Ex.: Etiquetas de preço, Produtos, Caixas"
       oninput="procEd.unidade=this.value;$('#prev').textContent=procEd.unidade.trim()?'Vai aparecer: '+rotuloUn(procEd.unidade.trim()):''">
       <p class="mut sm-t" id="prev" style="margin:6px 2px 0">${procEd.unidade ? 'Vai aparecer: ' + esc(rotuloUn(procEd.unidade)) : ''}</p></div>
+    ${cfg.grupos ? `<div class="g2"><div class="fld"><label class="f">Frequência <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(procEd.frequencia)}" placeholder="Ex.: 2x/dia" oninput="procEd.frequencia=this.value"></div>
+      <div class="fld"><label class="f">Responsável <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(procEd.responsavel)}" placeholder="Ex.: Farmacêutico" oninput="procEd.responsavel=this.value"></div></div>` : ''}
     <div class="fld"><label class="f">Como acompanhar</label><textarea class="in" rows="5" placeholder="Quando começa e acaba a medição, o que contar, cuidados…" oninput="procEd.descricao=this.value">${esc(procEd.descricao)}</textarea></div>
     ${p ? `<label class="chk"><input type="checkbox" ${procEd.ativo ? 'checked' : ''} onchange="procEd.ativo=this.checked"> Ativo (aparece para os consultores)</label>` : ''}
     <div class="err" id="perr"></div>
@@ -1013,19 +1071,21 @@ function abrirProcesso(id) {
     <button class="btn ghost" onclick="fecharSheet()">Cancelar</button>`);
 }
 async function salvarProcesso() {
+  const k = ttK(), cfg = ttCfg();
   if (!procEd.nome.trim() || !procEd.unidade.trim()) return $('#perr').textContent = 'Preencha o nome e a unidade de medida.';
   $('#bproc').disabled = true;
   try {
-    await rpc('adm_tt_processo_salvar', { p_token: sessao.token, p_id: procEd.id, p_nome: procEd.nome, p_unidade: procEd.unidade, p_descricao: procEd.descricao, p_ativo: procEd.ativo });
-    await carregarProcessos(); if (procEd.id) { cache.recolha_tempos = await rpc('tt_listar', { p_token: sessao.token }); store.set(cacheKey('recolha_tempos'), cache.recolha_tempos); }
+    await rpc(`adm_${cfg.rpc}_processo_salvar`, { p_token: sessao.token, p_id: procEd.id, p_nome: procEd.nome, p_unidade: procEd.unidade, p_descricao: procEd.descricao, p_ativo: procEd.ativo,
+      ...(cfg.grupos ? { p_grupo: procEd.grupo, p_frequencia: procEd.frequencia, p_responsavel: procEd.responsavel } : {}) });
+    await carregarProcessos(k); if (procEd.id) { cache[k] = await rpc(`${cfg.rpc}_listar`, { p_token: sessao.token }); store.set(cacheKey(k), cache[k]); }
     fecharSheet(); render(); toast('Processo salvo ✓');
-  } catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); $('#perr').textContent = msgErro(e); $('#bproc').disabled = false; }
+  } catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); $('#perr').textContent = e.message === 'PROCESSO_EXISTE' ? 'Já existe um processo com esse nome.' : msgErro(e); $('#bproc').disabled = false; }
 }
 async function excluirProcesso(id) {
   if (!confirm('Excluir este processo? Se já tiver registros, fica só inativo e o histórico mantém-se.')) return;
   try {
-    const r = await rpc('adm_tt_processo_excluir', { p_token: sessao.token, p_id: id });
-    await carregarProcessos(); fecharSheet(); render();
+    const k = ttK(), r = await rpc(`adm_${ttCfg().rpc}_processo_excluir`, { p_token: sessao.token, p_id: id });
+    await carregarProcessos(k); fecharSheet(); render();
     toast(r === 'desativado' ? 'Tinha registros: ficou inativo' : 'Processo excluído');
   } catch (e) { if (e.message === 'SESSAO_INVALIDA') return expirou(); $('#perr').textContent = msgErro(e); }
 }
