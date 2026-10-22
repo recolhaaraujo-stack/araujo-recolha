@@ -142,6 +142,8 @@ details.grp[open] summary{margin-bottom:8px}
 .gch{display:flex;gap:6px;overflow-x:auto;margin:4px -2px 14px;padding:2px;scrollbar-width:none}
 .gch button{flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 12px;font:inherit;font-size:14px;font-weight:600;color:var(--mut);cursor:pointer}
 .gch button small{opacity:.7;font-weight:600}.gch button.on{background:var(--kb);border-color:var(--kb);color:#fff}
+.defn{border:1.5px dashed var(--warnln);background:var(--warnbg);border-radius:12px;padding:12px 14px;margin-top:12px}
+.defn b{color:var(--warn);font-size:14px}.defn p{margin:4px 0 12px;font-size:14px}
 .como{background:var(--soft);border-radius:12px;padding:12px 14px;margin-top:4px}
 .como b{color:var(--kb);font-size:14px}.como p{margin:4px 0 10px;white-space:pre-line;font-size:15px}
 .rk{display:flex;justify-content:space-between;gap:10px}.rk b{white-space:nowrap}
@@ -191,7 +193,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.7';
+const VERSAO = '4.8';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -858,7 +860,7 @@ function ttDe(k) {
   if (!ttEstados[k]) {
     const c = TEMPOS[k], u = store.get(`rec_${c.rpc}_ultimo`, {});
     ttEstados[k] = { processo: u.processo || '', loja: u.loja || '', grupo: u.grupo || c.grupos?.[0][0] || '', executor: u.executor || '',
-                     acum: 0, t0: null, unidades: c.unPadrao || '', obs: '' };
+                     acum: 0, t0: null, unidades: c.unPadrao || '', obs: '', unidadeNova: '', inicio: '', fim: '' };
   }
   return ttEstados[k];
 }
@@ -886,11 +888,13 @@ function ttUn(delta) { const v = Math.max(0, (parseInt(tt.unidades) || 0) + delt
 function ttValidar() {
   const b = $('#ttsalvar'); if (!b) return;
   const u = parseInt(tt.unidades) || 0, s = ttSegundos();
-  b.disabled = !(procDe(tt.processo)?.ativo && (sessao.loja || tt.loja) && s > 0 && u > 0);
+  const p = procDe(tt.processo);
+  b.disabled = !(p?.ativo && (sessao.loja || tt.loja) && s > 0 && u > 0 && (!aDefinir(p) || tt.unidadeNova.trim()));
   $('#ttpu').textContent = s > 0 && u > 0 ? `${num1(s / u)} s por unidade` : '';
 }
 function ttGuardarUltimo() { store.set(`rec_${ttCfg().rpc}_ultimo`, { processo: tt.processo, loja: tt.loja, grupo: tt.grupo, executor: tt.executor }); }
-function ttGrupo(g) { tt.grupo = g; if (procDe(tt.processo)?.grupo !== g) tt.processo = ''; ttGuardarUltimo(); render(); }
+function ttGrupo(g) { tt.grupo = g; if (procDe(tt.processo)?.grupo !== g) ttProc(''); else render(); }
+function ttProc(id) { tt.processo = id; tt.unidadeNova = ''; tt.inicio = ''; tt.fim = ''; ttGuardarUltimo(); render(); }
 function ttExecutor(x) { tt.executor = tt.executor === x ? '' : x; ttGuardarUltimo(); render(); }
 // Estatísticas de uma lista de tomadas
 function estatTt(l) {
@@ -898,7 +902,9 @@ function estatTt(l) {
   const pu = l.map(r => r.tempo_seg / r.unidades);
   return { n, t, u, porUn: u ? t / u : 0, mediaUn: n ? u / n : 0, mediaT: n ? t / n : 0, min: n ? Math.min(...pu) : 0, max: n ? Math.max(...pu) : 0 };
 }
-const chipsProc = p => [`Unidade de medida: ${p.unidade}`, p.frequencia, p.responsavel && `Responsável: ${p.responsavel}`]
+// Ritmo - Farma: processo cuja unidade (e início/fim) ainda é definida na primeira tomada
+const aDefinir = p => !!(p && TEMPOS[ttK()].grupos && p.unidade_definida === false);
+const chipsProc = p => [`Unidade de medida: ${aDefinir(p) ? 'a definir' : p.unidade}`, p.frequencia, p.responsavel && `Responsável: ${p.responsavel}`]
   .filter(Boolean).map(t => `<span class="chip">${esc(t)}</span>`).join(' ');
 
 function vTempos() {
@@ -913,9 +919,14 @@ function vTempos() {
   const est = p ? estatTt(registros(k).filter(r => r.processo_id === p.id)) : null;
   return `<section class="card">
       ${grupos ? `<label class="f">Frequência</label><div class="gch">${grupos.map(([g, l]) => `<button class="${tt.grupo === g ? 'on' : ''}" onclick="ttGrupo('${g}')">${esc(l)} <small>${ativos.filter(x => x.grupo === g).length}</small></button>`).join('')}</div>` : ''}
-      <div class="fld"><label class="f">Processo</label><select class="in" onchange="tt.processo=this.value;ttGuardarUltimo();render()">
+      <div class="fld"><label class="f">Processo</label><select class="in" onchange="ttProc(this.value)">
         <option value="">Selecione…</option>${lista.map(x => `<option value="${esc(x.id)}" ${p?.id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>
       ${p ? `<div class="como"><b>Como acompanhar</b><p>${esc(p.descricao || 'Sem descrição.')}</p>${chipsProc(p)}</div>` : ''}
+      ${aDefinir(p) ? `<div class="defn"><b>Primeira tomada deste processo</b><p>Defina como ele vai ser medido. Fica gravado para as próximas tomadas.</p>
+        <div class="fld"><label class="f">Unidade de medida</label><input class="in" value="${esc(tt.unidadeNova)}" placeholder="Ex.: Receitas, E-mails, Registros, Execuções"
+          oninput="tt.unidadeNova=this.value;$('#ttunl').textContent=rotuloUn(this.value.trim());ttValidar()"></div>
+        <div class="fld"><label class="f">Início da medição <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(tt.inicio)}" placeholder="Ex.: quando abre o sistema de receitas" oninput="tt.inicio=this.value"></div>
+        <div class="fld" style="margin:0"><label class="f">Fim da medição <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(tt.fim)}" placeholder="Ex.: quando arquiva a última receita" oninput="tt.fim=this.value"></div></div>` : ''}
       <div class="fld" style="margin:14px 0 0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
     </section>
     <section class="card crono">
@@ -928,7 +939,7 @@ function vTempos() {
         <label><input class="in" id="tts" inputmode="decimal" value="${s > 0 ? (s - m * 60).toFixed(1) : ''}" placeholder="0" oninput="ttManual()"> seg</label></div>
     </section>
     <section class="card">
-      <h2>${esc(rotuloUn(p?.unidade))}</h2>
+      <h2 id="ttunl">${esc(rotuloUn(aDefinir(p) ? tt.unidadeNova.trim() : p?.unidade))}</h2>
       <div class="stepper"><button class="btn sec" onclick="ttUn(-1)">−</button>
         <input class="in" id="ttu" inputmode="numeric" value="${esc(tt.unidades)}" placeholder="0" oninput="tt.unidades=this.value.replace(/\\D/g,'');this.value=tt.unidades;ttValidar()">
         <button class="btn sec" onclick="ttUn(1)">+</button></div>
@@ -945,11 +956,21 @@ function vTempos() {
 function ttSalvar() {
   if (tt.t0) { tt.acum = ttSegundos(); tt.t0 = null; }
   const k = ttK(), cfg = ttCfg(), p = procDe(tt.processo), loja = sessao.loja || tt.loja, seg = Math.round(tt.acum * 10) / 10, un = parseInt(tt.unidades) || 0;
-  if (!p?.ativo || !loja || seg <= 0 || un <= 0) return;
-  const r = { id: uid(), criado_em: new Date().toISOString(), loja, cluster: CLUSTER_DE[loja], processo_id: p.id, processo: p.nome, unidade: p.unidade,
+  const def = aDefinir(p), unNova = tt.unidadeNova.trim();
+  if (!p?.ativo || !loja || seg <= 0 || un <= 0 || (def && !unNova)) return;
+  const r = { id: uid(), criado_em: new Date().toISOString(), loja, cluster: CLUSTER_DE[loja], processo_id: p.id, processo: p.nome, unidade: def ? unNova : p.unidade,
               tempo_seg: seg, unidades: un, obs: tt.obs.trim(), usuario: sessao.nome,
-              ...(cfg.grupos ? { grupo: p.grupo, executor: tt.executor } : {}) };
+              ...(cfg.grupos ? { grupo: p.grupo, executor: tt.executor } : {}),
+              ...(def ? { unidade_nova: unNova, inicio: tt.inicio.trim(), fim: tt.fim.trim() } : {}) };
   if (!guardarNaFila(k, r)) return;
+  if (def) {   // já fica definido neste aparelho; o servidor grava-o no processo ao receber a tomada
+    const ini = tt.inicio.trim(), fim = tt.fim.trim();
+    Object.assign(p, { unidade: unNova, unidade_definida: true });
+    if (ini || fim) p.descricao = `Início: ${ini || 'a definir'}
+Fim: ${fim || 'a definir'}
+${(p.descricao || '').replace('Início e fim: a definir na primeira tomada em loja.', '').trim()}`.trim();
+    store.set(procKey(k), procs[k]); tt.unidadeNova = ''; tt.inicio = ''; tt.fim = '';
+  }
   tt.acum = 0; tt.unidades = cfg.unPadrao || ''; tt.obs = '';
   render(); scrollTo(0, 0); toast(`Salvo ✓ ${fmtTempo(seg)} · ${un} ${minusc(p.unidade)}`); sincronizar();
 }
