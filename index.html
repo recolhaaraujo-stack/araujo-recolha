@@ -196,7 +196,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.9';
+const VERSAO = '4.9.1';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -931,7 +931,7 @@ function vTempos() {
           oninput="tt.unidadeNova=this.value;$('#ttunl').textContent=rotuloUn(this.value.trim());ttValidar()"></div>
         <div class="fld"><label class="f">Início da medição <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(tt.inicio)}" placeholder="Ex.: quando abre o sistema de receitas" oninput="tt.inicio=this.value"></div>
         <div class="fld" style="margin:0"><label class="f">Fim da medição <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(tt.fim)}" placeholder="Ex.: quando arquiva a última receita" oninput="tt.fim=this.value"></div></div>` : ''}
-      <div class="fld" style="margin:14px 0 0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
+      <div class="fld" style="margin:14px 0 0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, `tt.loja=this.value;ttGuardarUltimo();${p?.tipo === 'acompanhamento' ? 'render()' : 'ttValidar()'}`)}</div>
     </section>`;
   if (p?.tipo === 'acompanhamento') return (rfAc ? '' : topo) + vAcomp();   // a decorrer: só o acompanhamento, sem trocar de processo
   return topo + `<section class="card crono">
