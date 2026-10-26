@@ -144,6 +144,9 @@ details.grp[open] summary{margin-bottom:8px}
 .gch button small{opacity:.7;font-weight:600}.gch button.on{background:var(--kb);border-color:var(--kb);color:#fff}
 .defn{border:1.5px dashed var(--warnln);background:var(--warnbg);border-radius:12px;padding:12px 14px;margin-top:12px}
 .defn b{color:var(--warn);font-size:14px}.defn p{margin:4px 0 12px;font-size:14px}
+.hr{flex:0 0 auto!important;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);font-weight:600}.hr .in{width:120px;padding:8px 10px}
+.aux{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}.aux span{flex:1;color:var(--mut)}
+.aux button{border:0;background:none;color:var(--mut);font-size:16px;padding:4px 8px;cursor:pointer}
 .como{background:var(--soft);border-radius:12px;padding:12px 14px;margin-top:4px}
 .como b{color:var(--kb);font-size:14px}.como p{margin:4px 0 10px;white-space:pre-line;font-size:15px}
 .rk{display:flex;justify-content:space-between;gap:10px}.rk b{white-space:nowrap}
@@ -193,7 +196,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '4.8';
+const VERSAO = '4.9';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -371,7 +374,7 @@ let filtros = { cluster: '', loja: '', pacote: '', causa: '', de: '', ate: '' };
 let ttFiltros = { processo: '', loja: '' };
 const salvarFila = () => store.set('rec_fila', fila);
 const cacheKey = k => `rec_cache_${k}_${sessao.username}`;
-const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); procs = {}; for (const k in TEMPOS) procs[k] = store.get(procKey(k), []); };
+const carregarCache = () => { cache = {}; for (const k in FERRAMENTAS) cache[k] = store.get(cacheKey(k), []); procs = {}; for (const k in TEMPOS) procs[k] = store.get(procKey(k), []); rfAc = store.get(acKey(), null); };
 const minhaFila = k => fila.filter(r => r._dono === sessao.username && (!k || r._tool === k));
 function registros(k) {
   const c = cache[k] || [], ids = new Set(c.map(r => r.id));
@@ -489,7 +492,7 @@ function render() {
     corpo = tab === 'inicio' ? vTempos() : tab === 'processos' && isAdmin() ? vProcessos() : vTemposPainel();
   }
   app.innerHTML = shell(voltar ? f.nome : sessao.nome, voltar ? sessao.nome : (CLUSTER_DE[sessao.loja] || f.nome), corpo, tabs, voltar);
-  if (ehTempos(tela) && tab === 'inicio') ttTick();
+  if (ehTempos(tela) && tab === 'inicio') { ttTick(); acTick(); }
 }
 function shell(titulo, sub, corpo, tabs, voltar) {
   return `<header class="top">${voltar ? `<button onclick="irTela('home')" aria-label="Início">‹</button>` : ''}
@@ -909,6 +912,7 @@ const chipsProc = p => [`Unidade de medida: ${aDefinir(p) ? 'a definir' : p.unid
 
 function vTempos() {
   const cfg = ttCfg(), k = ttK(), ativos = procAtivos();
+  if (k === 'ritmo_farma' && rfAc && procDe(rfAc.processo_id)) { tt.processo = rfAc.processo_id; tt.grupo = procDe(rfAc.processo_id).grupo; }
   if (!ativos.length) return `<div class="empty">Ainda não há processos criados.<br><br>${isAdmin()
     ? `<button class="btn pri sm" onclick="irTab('processos')">Criar o primeiro processo</button>` : 'Peça ao admin para criar os processos.'}</div>`;
   const grupos = cfg.grupos?.filter(([g]) => ativos.some(p => p.grupo === g));
@@ -917,7 +921,7 @@ function vTempos() {
   const p = lista.find(x => x.id === tt.processo) || null;
   const s = ttSegundos(), m = Math.floor(s / 60);
   const est = p ? estatTt(registros(k).filter(r => r.processo_id === p.id)) : null;
-  return `<section class="card">
+  const topo = `<section class="card">
       ${grupos ? `<label class="f">Frequência</label><div class="gch">${grupos.map(([g, l]) => `<button class="${tt.grupo === g ? 'on' : ''}" onclick="ttGrupo('${g}')">${esc(l)} <small>${ativos.filter(x => x.grupo === g).length}</small></button>`).join('')}</div>` : ''}
       <div class="fld"><label class="f">Processo</label><select class="in" onchange="ttProc(this.value)">
         <option value="">Selecione…</option>${lista.map(x => `<option value="${esc(x.id)}" ${p?.id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div>
@@ -928,8 +932,9 @@ function vTempos() {
         <div class="fld"><label class="f">Início da medição <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(tt.inicio)}" placeholder="Ex.: quando abre o sistema de receitas" oninput="tt.inicio=this.value"></div>
         <div class="fld" style="margin:0"><label class="f">Fim da medição <span style="font-weight:400">(opcional)</span></label><input class="in" value="${esc(tt.fim)}" placeholder="Ex.: quando arquiva a última receita" oninput="tt.fim=this.value"></div></div>` : ''}
       <div class="fld" style="margin:14px 0 0"><label class="f">Loja</label>${sessao.loja ? `<div class="in" style="background:var(--bg)">${esc(sessao.loja)}</div>` : selLoja(tt.loja, 'tt.loja=this.value;ttGuardarUltimo();ttValidar()')}</div>
-    </section>
-    <section class="card crono">
+    </section>`;
+  if (p?.tipo === 'acompanhamento') return (rfAc ? '' : topo) + vAcomp();   // a decorrer: só o acompanhamento, sem trocar de processo
+  return topo + `<section class="card crono">
       <h2>Tempo</h2>
       <div class="disp" id="ttd">${fmtTempo(s)}</div>
       <div class="row"><button class="btn ${tt.t0 ? 'run' : 'pri'}" id="ttb" onclick="ttIniciarParar()">${tt.t0 ? '⏸ Parar' : (s > 0 ? '▶ Continuar' : '▶ Iniciar')}</button>
@@ -1029,6 +1034,7 @@ function vTemposPainel() {
         <div><b style="font-size:20px">${num1(e.porUn)} s</b><div class="mut sm-t">média</div></div>
         <div><b style="font-size:20px">${num1(e.max)} s</b><div class="mut sm-t">mais lenta</div></div></div>
         <p class="mut sm-t" style="margin:10px 0 0">Total: ${fmtTempo(e.t)} para ${e.u} ${esc(minusc(p.unidade))}. Média = tempo total ÷ unidades totais.</p></section>
+      ${vAcPainel(lista)}
       ${porLoja.length > 1 ? `<section class="card"><h2>Tempo por unidade, por loja</h2>
         ${porLoja.map(([l, x]) => `<div class="par"><div class="n rk"><span>${esc(l)}</span><b>${num1(x.porUn)} s</b></div>
           <div class="bar"><i style="width:${(x.porUn / maxL * 100).toFixed(1)}%"></i></div><div class="v">${plural(x.n, 'tomada', 'tomadas')}</div></div>`).join('')}</section>` : ''}
@@ -1043,6 +1049,8 @@ function detalheTt(id) {
     <dl class="kv"><dt>Por unidade</dt><dd>${num1(r.tempo_seg / r.unidades)} s</dd><dt>Data</dt><dd>${fmtData(r.criado_em)}</dd>
       <dt>Loja</dt><dd>${esc(r.loja)}</dd>${r.grupo ? `<dt>Frequência</dt><dd>${esc(nomeGrupo(r.grupo))}</dd>` : ''}
       ${r.executor ? `<dt>Quem executou</dt><dd>${esc(r.executor)}</dd>` : ''}<dt>Registrado por</dt><dd>${esc(r.usuario)}</dd>
+      ${r.detalhe ? `<dt>Acompanhamento</dt><dd>${hhmm(r.detalhe.inicio)}–${hhmm(r.detalhe.fim)} (${fmtHms(r.detalhe.duracao_seg)})</dd>
+        <dt>Auxílios</dt><dd>${(r.detalhe.auxilios || []).map((a, i) => `#${i + 1} ${hhmm(a.hora)} · ${fmtTempo(a.seg)}`).join('<br>')}</dd>` : ''}
       ${r.obs ? `<dt>Observação</dt><dd>${esc(r.obs)}</dd>` : ''}<dt>Estado</dt><dd>${r._pendente ? 'Aguardando envio' : 'Enviado ✓'}</dd></dl>
     ${podeExcluir(r) ? `<button class="btn danger" onclick="excluirRegistro('${k}','${esc(r.id)}')">Excluir registro</button>` : '<p class="mut sm-t">Só quem registrou (ou o admin) pode excluir.</p>'}
     <button class="btn sec" onclick="fecharSheet()">Fechar</button>`);
@@ -1052,10 +1060,110 @@ function exportarTt() {
   const cfg = ttCfg(), rf = !!cfg.grupos;
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', n2 = v => String(v).replace('.', ',');
   const cols = ['id', 'data_hora', 'loja', 'cluster', ...(rf ? ['frequencia'] : []), 'processo', 'unidade_medida', 'tempo_seg', 'tempo_mm_ss', 'unidades', 'seg_por_unidade',
-                ...(rf ? ['quem_executou'] : []), 'obs', 'usuario'];
+                ...(rf ? ['quem_executou', 'acomp_inicio', 'acomp_fim', 'acomp_duracao_seg', 'auxilios_seg'] : []), 'obs', 'usuario'];
   const linhas = porData(ttFiltrar()).map(r => [r.id, fmtData(r.criado_em), r.loja, r.cluster, ...(rf ? [nomeGrupo(r.grupo)] : []), r.processo, r.unidade,
-    n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades, n2((r.tempo_seg / r.unidades).toFixed(2)), ...(rf ? [r.executor] : []), r.obs, r.usuario].map(q).join(';'));
+    n2(r.tempo_seg), fmtTempo(r.tempo_seg), r.unidades, n2((r.tempo_seg / r.unidades).toFixed(2)), ...(rf ? [r.executor, r.detalhe ? fmtData(r.detalhe.inicio) : '', r.detalhe ? fmtData(r.detalhe.fim) : '', r.detalhe?.duracao_seg ?? '',
+      (r.detalhe?.auxilios || []).map(a => n2(a.seg)).join(' | ')] : []), r.obs, r.usuario].map(q).join(';'));
   baixar('﻿' + [cols.join(';'), ...linhas].join('\r\n'), `${cfg.arquivo}_${hojeISO()}.csv`);
+}
+
+// ── Acompanhamento (ex.: Auxílio Vendas Balcão): vários auxílios dentro do período acompanhado ──
+let rfAc = null;   // { processo_id, loja, inicio, auxilios: [{ hora, seg }], atual, executor, obs } — fica no aparelho até terminar
+const acKey = () => `rec_rf_acomp_${sessao.username}`;
+const acGuardar = () => store.set(acKey(), rfAc);
+const hhmm = iso => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const comHora = (iso, v) => { const d = new Date(iso), [h, m] = v.split(':').map(Number); d.setHours(h, m, 0, 0); return d.toISOString(); };
+const fmtHms = s => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`; };
+const acTotal = () => rfAc.auxilios.reduce((a, x) => a + x.seg, 0);
+let acTimer = null;
+function acTick() {
+  clearInterval(acTimer);
+  const pintar = () => {
+    const e = $('#ace'); if (!e || !rfAc) { clearInterval(acTimer); return; }
+    e.textContent = fmtHms((Date.now() - Date.parse(rfAc.inicio)) / 1000);
+    $('#acd').textContent = fmtTempo(rfAc.atual ? (Date.now() - Date.parse(rfAc.atual)) / 1000 : 0);
+  };
+  pintar(); acTimer = setInterval(pintar, 200);
+}
+function vAcomp() {
+  const loja = sessao.loja || tt.loja, cfg = ttCfg();
+  if (!rfAc) return `<section class="card"><h2>Acompanhamento</h2>
+      <p class="mut sm-t" style="margin:0 0 12px">Toque quando começar a acompanhar o farmacêutico no balcão: a hora de início fica registrada. Depois, registre auxílio a auxílio.</p>
+      <button class="btn pri" ${loja ? '' : 'disabled'} onclick="acIniciar()">▶ Começar acompanhamento</button>
+      ${loja ? '' : '<p class="mut sm-t" style="margin:8px 0 0">Escolha a loja primeiro.</p>'}</section>`;
+  const n = rfAc.auxilios.length;
+  return `<section class="card"><div class="row" style="align-items:center"><div><h2 style="margin:0">${esc(procDe(rfAc.processo_id)?.nome || 'Acompanhamento')}</h2><span class="mut sm-t">${esc(rfAc.loja)} · decorrido <b id="ace"></b></span></div>
+        <label class="hr">Começou às<input class="in" type="time" value="${hhmm(rfAc.inicio)}" onchange="acHoraInicio(this.value)"></label></div></section>
+    <section class="card crono"><h2>${rfAc.atual ? `Auxílio ${n + 1} em curso` : `Próximo auxílio (${n + 1})`}</h2>
+      <div class="disp" id="acd">00:00.0</div>
+      <button class="btn ${rfAc.atual ? 'run' : 'pri'}" onclick="acAuxilio()">${rfAc.atual ? '■ Terminar auxílio' : '▶ Iniciar auxílio'}</button>
+      <p class="mut sm-t" style="margin:10px 0 0">Um auxílio por cupom: inicie quando ele começa a ajudar e termine quando acaba.</p></section>
+    <section class="card"><h2>${plural(n, 'auxílio', 'auxílios')} · ${fmtTempo(acTotal())}</h2>
+      ${n ? rfAc.auxilios.map((x, i) => `<div class="aux"><span>#${i + 1} · ${hhmm(x.hora)}</span><b>${fmtTempo(x.seg)}</b><button onclick="acApagar(${i})" aria-label="Apagar auxílio">✕</button></div>`).reverse().join('')
+        : '<p class="mut sm-t" style="margin:0">Ainda sem auxílios.</p>'}
+      ${cfg.executores ? `<div class="fld" style="margin:14px 0 0"><label class="f">Quem executou <span style="font-weight:400">(opcional)</span></label>
+        <div class="gch">${cfg.executores.map(x => `<button class="${rfAc.executor === x ? 'on' : ''}" onclick="acExecutor('${esc(x)}')">${esc(x)}</button>`).join('')}</div></div>` : ''}
+      <div class="fld" style="margin:6px 0 0"><label class="f">Observação <span style="font-weight:400">(opcional)</span></label>
+        <input class="in" value="${esc(rfAc.obs)}" placeholder="Algo fora do normal?" oninput="rfAc.obs=this.value;acGuardar()"></div></section>
+    <button class="btn pri" onclick="acTerminar()">Terminar acompanhamento</button>
+    <button class="btn ghost" onclick="acDescartar()">Descartar acompanhamento</button>`;
+}
+function acIniciar() {
+  rfAc = { processo_id: tt.processo, loja: sessao.loja || tt.loja, inicio: new Date().toISOString(), auxilios: [], atual: null, executor: tt.executor, obs: '' };
+  acGuardar(); render(); scrollTo(0, 0);
+}
+function acHoraInicio(v) {
+  if (!v) return;
+  const iso = comHora(rfAc.inicio, v), ref = rfAc.auxilios[0]?.hora || rfAc.atual;
+  if (Date.parse(iso) > Date.now() || (ref && Date.parse(iso) > Date.parse(ref))) { toast('O início tem de ser antes do primeiro auxílio'); return render(); }
+  rfAc.inicio = iso; acGuardar();
+}
+function acPararAtual() {
+  if (!rfAc.atual) return 0;
+  const seg = Math.round((Date.now() - Date.parse(rfAc.atual)) / 100) / 10;
+  if (seg > 0) rfAc.auxilios.push({ hora: rfAc.atual, seg });
+  rfAc.atual = null; return seg;
+}
+function acAuxilio() {
+  if (rfAc.atual) { const seg = acPararAtual(); toast(`Auxílio ${rfAc.auxilios.length} registrado · ${fmtTempo(seg)}`); }
+  else rfAc.atual = new Date().toISOString();
+  acGuardar(); render();
+}
+function acApagar(i) { if (!confirm(`Apagar o auxílio #${i + 1}?`)) return; rfAc.auxilios.splice(i, 1); acGuardar(); render(); }
+function acExecutor(x) { rfAc.executor = rfAc.executor === x ? '' : x; acGuardar(); render(); }
+function acDescartar() { if (!confirm('Descartar este acompanhamento? Os auxílios registrados nele são perdidos.')) return; rfAc = null; store.del(acKey()); render(); }
+function acTerminar() {
+  acPararAtual(); acGuardar();
+  if (!rfAc.auxilios.length) { render(); return alert('Registre pelo menos um auxílio, ou descarte o acompanhamento.'); }
+  render();
+  abrirSheet(`<h2 class="sh">Terminar acompanhamento</h2>
+    <div class="fld"><label class="f">Terminou às</label><input class="in" type="time" id="acfim" value="${hhmm(new Date().toISOString())}"></div>
+    <dl class="kv"><dt>Começou às</dt><dd>${hhmm(rfAc.inicio)}</dd><dt>Auxílios (cupons)</dt><dd>${rfAc.auxilios.length}</dd><dt>Tempo em auxílio</dt><dd>${fmtTempo(acTotal())}</dd></dl>
+    <div class="err" id="acerr"></div>
+    <button class="btn pri" onclick="acSalvar()">Salvar acompanhamento</button>
+    <button class="btn ghost" onclick="fecharSheet()">Voltar</button>`);
+}
+function acSalvar() {
+  const v = $('#acfim').value, agora = new Date().toISOString(), fim = v && v !== hhmm(agora) ? comHora(rfAc.inicio, v) : agora, ult = rfAc.auxilios.at(-1);
+  if (Date.parse(fim) < Date.parse(ult.hora) + ult.seg * 1000 - 60000) return $('#acerr').textContent = 'O fim tem de ser depois do último auxílio.';
+  const p = procs.ritmo_farma?.find(x => x.id === rfAc.processo_id); if (!p) return $('#acerr').textContent = 'Este processo já não existe.';
+  const tot = Math.round(acTotal() * 10) / 10, n = rfAc.auxilios.length;
+  const r = { id: uid(), criado_em: rfAc.inicio, loja: rfAc.loja, cluster: CLUSTER_DE[rfAc.loja], processo_id: p.id, processo: p.nome, unidade: p.unidade,
+              grupo: p.grupo, tempo_seg: tot, unidades: n, executor: rfAc.executor, obs: (rfAc.obs || '').trim(), usuario: sessao.nome,
+              detalhe: { inicio: rfAc.inicio, fim, duracao_seg: Math.max(0, Math.round((Date.parse(fim) - Date.parse(rfAc.inicio)) / 1000)), auxilios: rfAc.auxilios } };
+  if (!guardarNaFila('ritmo_farma', r)) return;
+  rfAc = null; store.del(acKey()); fecharSheet(); render(); scrollTo(0, 0);
+  toast(`Salvo ✓ ${plural(n, 'auxílio', 'auxílios')} · ${fmtTempo(tot)}`); sincronizar();
+}
+// Painel: o que os períodos acompanhados mostram (tempo em auxílio e cupons por hora)
+function vAcPainel(lista) {
+  const ac = lista.filter(r => r.detalhe?.duracao_seg); if (!ac.length) return '';
+  const dur = ac.reduce((a, r) => a + r.detalhe.duracao_seg, 0), t = ac.reduce((a, r) => a + Number(r.tempo_seg), 0), n = ac.reduce((a, r) => a + r.unidades, 0);
+  return `<section class="card"><h2>Períodos acompanhados</h2><div class="kg" style="margin:0">
+      <div class="kpi"><b>${fmtHms(dur)}</b><span>tempo acompanhado (${plural(ac.length, 'período', 'períodos')})</span></div>
+      <div class="kpi"><b>${num1(t / dur * 100)}%</b><span>do tempo em auxílio</span></div>
+      <div class="kpi"><b>${num1(n / (dur / 3600))}</b><span>cupons por hora acompanhada</span></div>
+      <div class="kpi"><b>${fmtTempo(t / n)}</b><span>tempo médio por cupom</span></div></div></section>`;
 }
 
 // ── Processos da Tomada de Tempos e do Ritmo - Farma (admin) ───────────
