@@ -237,7 +237,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '5.2';
+const VERSAO = '5.3';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -1331,7 +1331,7 @@ async function sgcSync() {
   try {
     if (!sgc) sgc = { visitas: [], pend: {}, pendAcoes: {} };
     sgc.desc = sgc.desc || [];
-    for (const id of [...sgc.desc]) { await rpc('sgc_visita_descartar', { p_token: sessao.token, p_id: id }); sgc.desc = sgc.desc.filter(x => x !== id); }
+    for (const id of [...sgc.desc]) { await rpc('sgc_visita_excluir', { p_token: sessao.token, p_id: id }); sgc.desc = sgc.desc.filter(x => x !== id); }
     for (const [id, ver] of Object.entries(sgc.pend)) {
       const v = sgcV(id);
       if (v) await rpc('sgc_visita_gravar', { p_token: sessao.token, p_v: v });
@@ -1466,12 +1466,12 @@ function sgIniciar() {
 }
 
 function sgDescartar() {
-  const v = sgcV(); if (!v || v.estado !== 'rascunho') return;
-  if (!confirm(`Descartar a visita ${v.numero} de ${sgcG(v.gestor_id).nome}? Tudo o que foi registrado nela é apagado.`)) return;
+  const v = sgcV(); if (!v) return;
+  if (!confirm(`Eliminar a visita ${v.numero} de ${sgcG(v.gestor_id).nome}${v.loja ? ' (' + v.loja + ')' : ''}? Tudo o que foi registrado nela é apagado, sem volta.`)) return;
   sgc.visitas = sgc.visitas.filter(x => x.id !== v.id); delete sgc.pend[v.id];
-  sgc.desc = [...(sgc.desc || []), v.id]; sgcMudou(null); toast('Visita descartada'); sgIr('hoje');
+  sgc.desc = [...(sgc.desc || []), v.id]; sgcMudou(null); toast('Visita eliminada'); sgIr('hoje');
 }
-const sgcBtnDescartar = v => v.estado === 'rascunho' ? `<button class="btn ghost" style="color:#9E2A23" onclick="sgDescartar()">Descartar esta visita</button>` : '';
+const sgcBtnDescartar = v => `<button class="btn ghost" style="color:#9E2A23" onclick="sgDescartar()">Eliminar esta visita</button>`;
 // Abrir uma visita já feita para ver ou editar
 function sgEditar(id) { const v = sgcV(id); if (!v) return; sg.gestor = v.gestor_id; sg.visita = id; sg.comp = 1; tab = 'inicio'; sgIr('avaliar'); }
 
@@ -1634,13 +1634,13 @@ function sgcTextoFeedback(v) {
   const g = sgcG(v.gestor_id), d = sgcFbDados(v), L = [];
   L.push(`Feedback · ${g.nome} · visita ${v.numero}${v.loja ? ' · ' + v.loja : ''}${v.data ? ' · ' + fmtDia(v.data) : ''}`);
   L.push(`Resultado: ${sgcPct(d.r.pct)} (${d.r.pts} de ${d.r.max} pontos)`);
+  if (d.fortes.length) L.push('', 'Parabéns! Faz bem e está avançado em:', ...d.fortes.map(x => `- ${x.p.id} ${x.p.pergunta}`));
+  if (d.melhorar.length) L.push('', 'O que falta para chegar ao nível 2:', ...d.melhorar.map(x => `- ${x.p.id} ${x.p.pergunta} (hoje: ${x.n})\n  Para chegar a 2: ${x.p.descritor_2 || ''}`));
   if (d.ant) {
     L.push('', `Desde a visita ${d.ant.numero}:`, ...(d.mud.length ? d.mud.map(([c, s, a]) => `${s} ${sgcComp(c.id).nome}: ${sgcPct(a.pct)} → ${sgcPct(c.pct)}`) : ['Sem mudanças nas competências.']));
     if (d.subiu.length) L.push('Evoluiu:', ...d.subiu.map(x => `▲ ${x.p.id} ${x.p.pergunta} (${x.a.nota} → ${x.n})`));
     if (d.desceu.length) L.push('Piorou:', ...d.desceu.map(x => `▼ ${x.p.id} ${x.p.pergunta} (${x.a.nota} → ${x.n})`));
   }
-  if (d.fortes.length) L.push('', 'Parabéns! Faz bem e está avançado em:', ...d.fortes.map(x => `- ${x.p.id} ${x.p.pergunta}`));
-  if (d.melhorar.length) L.push('', 'O que falta para chegar ao nível 2:', ...d.melhorar.map(x => `- ${x.p.id} ${x.p.pergunta} (hoje: ${x.n})\n  Para chegar a 2: ${x.p.descritor_2 || ''}`));
   if (d.ev && v.feedback?.como_evoluir) L.push('', `Onde focar: ${sgcComp(d.ev.id).nome} (${sgcPct(d.ev.pct)} · ${d.ev.nivel})`, `Como evoluir: ${v.feedback.como_evoluir}`);
   const aa = d.ant?.acoes || [];
   if (aa.length && v.feedback?.incluir_acoes) L.push('', `Ações da visita ${d.ant.numero}:`, ...aa.map(a => `- ${a.descricao} (${a.estado})`));
@@ -1651,17 +1651,17 @@ function vSgcFeedback() {
   const v = sgcV(), g = sgcG(v.gestor_id), d = sgcFbDados(v), { ant, mud, ev } = d;
   const linhaP = (x, extra = '') => `<div class="sg-pl"><span class="sg-id">${x.p.id}</span>${sgcNotaBadge({ nota: x.n })}<span>${esc(x.p.pergunta)}${extra}</span></div>`;
   return `${sgcVoltar("sgIr('fecho')", 'Resultado')}<div class="sg-h"><small>Rascunho a partir das notas · revise</small><h2>Feedback para ${esc(g.nome)}</h2></div>
+    ${d.fortes.length ? `<section class="card"><h3 class="sec" style="margin-top:0">Pontos fortes · parabenizar</h3><p class="mut sm-t" style="margin:0 0 4px">Faz bem e está avançado nestes pontos.</p>${d.fortes.map(x => linhaP(x)).join('')}</section>` : ''}
+    ${d.melhorar.length ? `<section class="card sg-evo"><h3 class="sec" style="margin-top:0">O que falta para chegar ao 2</h3>${d.melhorar.map(x => linhaP(x, `<br><span class="sm-t"><b>Para chegar a 2:</b> ${esc(x.p.descritor_2 || '')}</span>`)).join('')}</section>` : ''}
     ${ant ? `<section class="card"><h3 class="sec" style="margin-top:0">Desde a visita ${ant.numero}</h3>
       ${mud.length ? mud.map(([c, s, a]) => `<div class="sg-row" style="margin:6px 0">${sgcSetaChip(s, ' ')}<span>${esc(sgcComp(c.id).nome)} ${sgcPct(a.pct)} → ${sgcPct(c.pct)}</span></div>`).join('') : '<p class="mut sm-t">Sem mudanças nas competências.</p>'}
       ${d.subiu.length ? `<h3 class="sec">Evoluiu</h3>${d.subiu.map(x => linhaP(x, ` <span class="mut">(${x.a.nota} → ${x.n})</span>`)).join('')}` : ''}
       ${d.desceu.length ? `<h3 class="sec">Piorou</h3>${d.desceu.map(x => linhaP(x, ` <span class="mut">(${x.a.nota} → ${x.n})</span>`)).join('')}` : ''}</section>` : ''}
-    ${d.fortes.length ? `<section class="card"><h3 class="sec" style="margin-top:0">Pontos fortes · parabenizar</h3><p class="mut sm-t" style="margin:0 0 4px">Faz bem e está avançado nestes pontos.</p>${d.fortes.map(x => linhaP(x)).join('')}</section>` : ''}
-    ${d.melhorar.length ? `<section class="card sg-evo"><h3 class="sec" style="margin-top:0">O que falta para chegar ao 2</h3>${d.melhorar.map(x => linhaP(x, `<br><span class="sm-t"><b>Para chegar a 2:</b> ${esc(x.p.descritor_2 || '')}</span>`)).join('')}</section>` : ''}
     ${ev ? `<section class="card"><h3 class="sec" style="margin-top:0">Onde focar · ${esc(sgcComp(ev.id).nome)} (${sgcPct(ev.pct)} · ${ev.nivel})</h3>
       <div class="fld" style="margin:0"><label class="f">Como evoluir <span style="font-weight:400">(opcional)</span></label><textarea class="in" rows="2" placeholder="O que ele deve fazer de diferente…" oninput="sgFb('como_evoluir',this.value)">${esc(v.feedback?.como_evoluir || '')}</textarea></div></section>` : ''}
     ${ant?.acoes?.length ? `<section class="card"><h3 class="sec" style="margin-top:0">Ações da visita ${ant.numero}</h3>${ant.acoes.map(vSgcAcaoEstado).join('')}
       <label class="chk" style="margin-top:8px"><input type="checkbox" ${v.feedback?.incluir_acoes ? 'checked' : ''} onchange="sgFb('incluir_acoes',this.checked)"> Incluir estas ações no texto do feedback</label></section>` : ''}
-    <section class="card"><h3 class="sec" style="margin-top:0">Novas ações · máximo 3</h3>
+    <section class="card"><h3 class="sec" style="margin-top:0">Ações · máximo 3</h3>
       ${v.acoes.map((a, i) => `<div class="sg-na"><div class="g2"><select class="in" onchange="sgAcao(${i},'competencia_id',this.value?+this.value:null)"><option value="">Competência…</option>
           ${sgc.competencias.map(c => `<option value="${c.id}" ${a.competencia_id === c.id ? 'selected' : ''}>${c.id} · ${esc(c.nome)}</option>`).join('')}</select>
           <input class="in" type="date" value="${esc(a.prazo || '')}" onchange="sgAcao(${i},'prazo',this.value||null)"></div>
@@ -1669,10 +1669,7 @@ function vSgcFeedback() {
           <input class="in" style="flex:0 0 32%" value="${esc(a.dono || '')}" placeholder="Dono" oninput="sgAcao(${i},'dono',this.value)">
           <button class="sg-x" onclick="sgAcaoApagar(${i})" aria-label="Apagar ação">✕</button></div></div>`).join('')}
       ${v.acoes.length < 3 ? `<button class="btn sec" onclick="sgAcaoNova()">+ Nova ação</button>` : ''}
-      <p class="mut sm-t" style="margin:8px 0 0">Estas ações abrem o resumo da próxima visita.</p></section>
-    <div class="row" style="margin-bottom:10px"><button class="btn sec" onclick="sgCopiar()">Copiar</button>
-      <button class="btn sec" onclick="window.open('https://wa.me/?text='+encodeURIComponent(sgcTextoFeedback(sgcV())),'_blank')">WhatsApp</button>
-      <button class="btn sec" onclick="sgcExcelVisita(sgcV())">Excel</button></div>
+      <p class="mut sm-t" style="margin:8px 0 0">Opcional. Só aparecem se as definirmos; abrem o resumo da próxima visita.</p></section>
     ${v.estado === 'feedback_dado' ? `<p class="mut sm-t" style="text-align:center">Feedback dado em ${fmtData(v.feedback_em)}.</p>`
       : `<button class="btn pri" onclick="sgFeedbackDado()">Marcar feedback como dado</button>`}`;
 }
@@ -1680,7 +1677,6 @@ function sgFb(k, t) { const v = sgcV(); v.feedback = { ...(v.feedback || {}), [k
 function sgAcaoNova() { const v = sgcV(); if (v.acoes.length >= 3) return; v.acoes.push({ id: uid(), competencia_id: sgcEvoluir(v)?.id || null, descricao: '', dono: sgcG(v.gestor_id).nome, prazo: null, estado: 'Aberta' }); sgcMudou(v); render(); }
 function sgAcao(i, k, val) { const v = sgcV(); v.acoes[i][k] = val; sgcMudou(v); }
 function sgAcaoApagar(i) { const v = sgcV(); v.acoes.splice(i, 1); sgcMudou(v); render(); }
-async function sgCopiar() { try { await navigator.clipboard.writeText(sgcTextoFeedback(sgcV())); toast('Texto copiado ✓'); } catch { alert(sgcTextoFeedback(sgcV())); } }
 function sgFeedbackDado() {
   const v = sgcV(); v.acoes = v.acoes.filter(a => a.descricao.trim());
   v.estado = 'feedback_dado'; v.feedback_em = new Date().toISOString(); sgcMudou(v); toast('Feedback marcado como dado ✓'); sgIr('hoje');
