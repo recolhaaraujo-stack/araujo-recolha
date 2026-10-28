@@ -171,6 +171,8 @@ details.grp[open] summary{margin-bottom:8px}
 .sg-wrap{flex-wrap:wrap;overflow:visible}.gch button.sg-tr{border-style:dashed;border-color:var(--kb);color:var(--kb)}.gch button.sg-tr.on{color:#fff}
 .sg-q{background:#fff;border:1px solid #D7DDE8;border-radius:14px;padding:12px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px}.sg-q.on{border:2px solid var(--kb)}
 .sg-ant{background:#F3F5F9;border-radius:10px;padding:8px 10px;font-size:13px;line-height:1.45;color:#1F2A44}.sg-ant b{color:var(--kb)}
+.sg-crit{display:flex;flex-direction:column;gap:4px}.sg-crit div{cursor:pointer;display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.4;padding:5px 6px;border-radius:8px;color:#1F2A44}
+.sg-crit div.on{background:#F3F5F9;box-shadow:inset 0 0 0 2px var(--kb)}
 .sg-nb{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .sg-nb button{height:46px;border-radius:10px;border:1px solid #D7DDE8;background:#fff;color:var(--kb);font:inherit;font-weight:700;font-size:16px;cursor:pointer}
 .sg-nb .n0.on{background:#FBE3E1;color:#9E2A23;border:2px solid #9E2A23}.sg-nb .n1.on{background:#E6EDFB;border:2px solid #103273}.sg-nb .n2.on{background:#103273;color:#fff;border:2px solid #103273}
@@ -1293,18 +1295,29 @@ const sgcResp = (v, pid) => v?.respostas?.find(r => r.pergunta_id === pid);
 const sgcPorque = (v, c) => v?.porques?.find(x => x.competencia_id === c)?.texto || '';
 function sgcCfg() { const c = sgc?.config || {}; return { li: +c.limite_intermediario || 0.5, la: +c.limite_avancado || 0.8, min: +c.min_perguntas_nivel_fiavel || 3 }; }
 const sgcNivel = pct => { const c = sgcCfg(); return pct == null ? 'Não observado' : pct < c.li ? 'Básico' : pct < c.la ? 'Intermediário' : 'Avançado'; };
-const sgcPct = p => p == null ? 'n/o' : Math.round(p * 100) + '%';
+const sgcPct = p => p == null ? 'N/A' : Math.round(p * 100) + '%';
 const sgcSeta = (a, b) => a == null || b == null ? null : b > a ? '▲' : b < a ? '▼' : '=';
-// Pontuação: só contam as perguntas com nota; % = pontos ÷ (2 × observadas); 0 observadas = "Não observado"
+// Nota de cada pergunta = a resposta mais recente: a de hoje ou, se ficou N/A ou sem resposta, a última dada numa visita anterior.
+// Só não conta se a pergunta nunca teve nota. (Pesos por competência/pergunta: por decidir com o João; hoje tudo vale o mesmo.)
+function sgcAntNota(v, pid) {
+  const vs = sgcFeitas(v.gestor_id).filter(x => x.numero < v.numero).reverse();
+  for (const x of vs) { const r = sgcResp(x, pid); if (r?.nota != null) return { nota: r.nota, de: x.numero }; }
+  return null;
+}
+function sgcEf(v, pid) {
+  const r = sgcResp(v, pid); if (r?.nota != null) return { nota: r.nota, hoje: true, de: v.numero };
+  const a = sgcAntNota(v, pid); return a ? { nota: a.nota, hoje: false, de: a.de } : null;
+}
+// Pontuação: % = pontos ÷ (2 × perguntas com nota); nunca observada = "Não observado"
 function sgcCalc(v) {
-  const cfg = sgcCfg(); let P = 0, O = 0;
+  const cfg = sgcCfg(); let P = 0, O = 0, H = 0;
   const comp = sgc.competencias.map(c => {
-    const ns = sgcPergs(c.id).map(p => sgcResp(v, p.id)?.nota).filter(n => n !== null && n !== undefined);
-    const pts = ns.reduce((a, b) => a + b, 0), obs = ns.length; P += pts; O += obs;
+    const ef = sgcPergs(c.id).map(p => sgcEf(v, p.id)).filter(Boolean);
+    const pts = ef.reduce((a, e) => a + e.nota, 0), obs = ef.length, hoje = ef.filter(e => e.hoje).length; P += pts; O += obs; H += hoje;
     const pct = obs ? pts / (2 * obs) : null;
-    return { id: c.id, obs, pts, max: 2 * obs, pct, nivel: sgcNivel(pct), pouca: obs > 0 && obs < cfg.min, total: sgcPergs(c.id).length };
+    return { id: c.id, obs, hoje, herdadas: obs - hoje, pts, max: 2 * obs, pct, nivel: sgcNivel(pct), pouca: obs > 0 && obs < cfg.min, total: sgcPergs(c.id).length };
   });
-  return { comp, pts: P, max: 2 * O, obs: O, pct: O ? P / (2 * O) : null };
+  return { comp, pts: P, max: 2 * O, obs: O, hoje: H, pct: O ? P / (2 * O) : null };
 }
 // ── Sincronização (cada alteração grava logo neste aparelho; o envio vai em segundo plano) ──
 function sgcMudou(v) {
@@ -1362,7 +1375,7 @@ function sgcSetaChip(s, txt = '') {
   const k = s === '▲' ? 'up' : s === '▼' ? 'dn' : 'eq';
   return `<span class="sg-seta ${k}">${s} ${txt || (s === '▲' ? 'melhorou' : s === '▼' ? 'piorou' : 'igual')}</span>`;
 }
-const sgcNotaBadge = r => r?.nota != null ? `<span class="sg-nt n${r.nota}">${r.nota}</span>` : '<span class="sg-nt nno">n/o</span>';
+const sgcNotaBadge = r => r?.nota != null ? `<span class="sg-nt n${r.nota}">${r.nota}</span>` : '<span class="sg-nt nno">N/A</span>';
 const sgcLegenda = () => { const c = sgcCfg(); return `<div class="sg-leg"><span><i style="background:#C5D2EE"></i>Básico &lt;${c.li * 100}%</span><span><i style="background:#7A9CE6"></i>Interm. ${c.li * 100}–${c.la * 100 - 1}%</span>
   <span><i style="background:#103273"></i>Avanç. ≥${c.la * 100}%</span><span>* menos de ${c.min} perguntas observadas</span></div>`; };
 const sgcVoltar = (onclick, txt) => `<button class="sg-back" onclick="${onclick}">‹ ${txt}</button>`;
@@ -1411,9 +1424,9 @@ function vSgcResumo() {
   if (ult) {
     const r = sgcCalc(ult), acoes = ult.acoes || [];
     corpo = `<section class="card sg-res"><small>Visita ${ult.numero} · resultado</small><div><b>${sgcPct(r.pct)}</b> <span>${r.pts} de ${r.max} pontos possíveis</span></div>
-        <span class="mut sm-t">${r.obs} de ${sgc.perguntas.length} perguntas observadas${ult.loja ? ' · ' + esc(ult.loja) : ''}${ult.data ? ' · ' + fmtDia(ult.data) : ''}</span>
+        <span class="mut sm-t">${r.obs} de ${sgc.perguntas.length} perguntas com nota · ${r.hoje} vistas na visita ${ult.numero}${ult.loja ? ' · ' + esc(ult.loja) : ''}${ult.data ? ' · ' + fmtDia(ult.data) : ''}</span>
         <div class="sg-leg" style="margin-top:8px">Nota por pergunta: ${sgcNotaBadge({ nota: 0 })} não demonstra ${sgcNotaBadge({ nota: 1 })} parcial ${sgcNotaBadge({ nota: 2 })} plena</div></section>
-      ${acoes.length ? `<section class="card"><h2>Ações da visita ${ult.numero}</h2><p class="mut sm-t" style="margin:0 0 6px">Combinadas no fim da visita ${ult.numero}. O estado também se atualiza durante a visita de hoje.</p>${acoes.map(vSgcAcaoEstado).join('')}</section>` : ''}
+      ${acoes.length ? `<section class="card"><h2>Ações da visita ${ult.numero}</h2><p class="mut sm-t" style="margin:0 0 6px">Combinadas no fim da visita ${ult.numero}. O estado atualiza-se dentro da visita, depois de a iniciar.</p>${acoes.map(vSgcAcaoLer).join('')}</section>` : ''}
       ${r.comp.map(c => vSgcCompResumo(ult, c, c.id === 1)).join('')}`;
   }
   return `${sgcVoltar("sgIr('hoje')", 'Hoje')}<div class="sg-h"><small>Antes da visita ${n}</small><h2>${ult ? `Resumo da visita ${ult.numero} · ` : ''}${esc(g.nome)}</h2></div>
@@ -1424,10 +1437,13 @@ function vSgcResumo() {
 function vSgcCompResumo(v, c, aberto) {
   const comp = sgcComp(c.id), pq = sgcPorque(v, c.id);
   return `<details class="card sg-comp" ${aberto ? 'open' : ''}><summary><div class="sg-row"><b style="flex:1">${c.id} · ${esc(comp.nome)}</b>${sgcNivelChip(c.nivel)}</div>
-      <span class="mut sm-t">${c.pts}/${c.max} pts · ${sgcPct(c.pct)} · ${c.obs} de ${c.total} perguntas</span> ${c.pouca ? sgcPouca : ''}
+      <span class="mut sm-t">${c.pts}/${c.max} pts · ${sgcPct(c.pct)} · ${c.obs} de ${c.total} perguntas com nota${c.herdadas ? ` (${c.herdadas} de visitas anteriores)` : ''}</span> ${c.pouca ? sgcPouca : ''}
       ${pq ? `<p class="sg-pq"><b>Porquê:</b> ${esc(pq)}</p>` : ''}</summary>
-    ${sgcPergs(c.id).map(p => { const r = sgcResp(v, p.id); return `<div class="sg-pl"><span class="sg-id">${p.id}</span>${sgcNotaBadge(r)}
-      <span>${r?.evidencia ? esc(r.evidencia) : `<span class="mut">${esc(p.pergunta)} — não observada</span>`}</span></div>`; }).join('')}</details>`;
+    ${sgcPergs(c.id).map(p => { const r = sgcResp(v, p.id), e = sgcEf(v, p.id); return `<div class="sg-pl"><span class="sg-id">${p.id}</span>${sgcNotaBadge(e)}
+      <span>${r?.evidencia ? esc(r.evidencia) : `<span class="mut">${esc(p.pergunta)} — ${e ? `nota da visita ${e.de}` : 'nunca observada'}</span>`}</span></div>`; }).join('')}</details>`;
+}
+function vSgcAcaoLer(a) {
+  return `<div class="sg-acao"><div><b>${esc(a.descricao)}</b><span class="mut sm-t">${a.competencia_id ? esc(SGC_CURTO[a.competencia_id]) + ' · ' : ''}${esc(a.dono || '')}${a.prazo ? ' · até ' + fmtDia(a.prazo) : ''}</span></div><span class="chip">${esc(a.estado)}</span></div>`;
 }
 function vSgcAcaoEstado(a) {
   return `<div class="sg-acao"><div><b>${esc(a.descricao)}</b><span class="mut sm-t">${a.competencia_id ? esc(SGC_CURTO[a.competencia_id]) + ' · ' : ''}${esc(a.dono || '')}${a.prazo ? ' · até ' + fmtDia(a.prazo) : ''}</span></div>
@@ -1462,27 +1478,24 @@ function vSgcChipsComp(v, ativo) {
 
 // 3. Avaliar por pergunta
 function vSgcAvaliar() {
-  const v = sgcV(), ant = sgcAnterior(v), c = sgComp1(), comp = sgcComp(c), ca = ant && sgcCalc(ant).comp[c - 1];
+  const v = sgcV(), c = sgComp1(), comp = sgcComp(c);
   const prox = sgc.competencias.find(x => x.id > c);
   return `${sgcVoltar("sgIr('hoje')", 'Hoje')}${vSgcTopoVisita(v)}${vSgcChipsComp(v, c)}
-    <div class="sg-row" style="margin:6px 0 10px"><h2 style="flex:1;margin:0;font-size:17px">${c} · ${esc(comp.nome)}</h2>
-      ${ca ? `<span class="mut sm-t" style="text-align:right">Visita ${ant.numero}<br><b style="color:var(--kb)">${sgcPct(ca.pct)} · ${SGC_ABREV[ca.nivel]}</b></span>` : ''}</div>
-    ${sgcPergs(c).map(p => vSgcPergunta(v, ant, p)).join('')}
+    <h2 style="margin:6px 0 10px;font-size:17px">${c} · ${esc(comp.nome)}</h2>
+    ${sgcPergs(c).map(p => vSgcPergunta(v, p)).join('')}
     <div class="sg-bar"><button class="btn sec" onclick="sgIr('notas')">Nota rápida</button>
       ${prox ? `<button class="btn pri" onclick="sg.comp=${prox.id};sgIr('avaliar')">Próxima: ${SGC_CURTO[prox.id]} ›</button>` : `<button class="btn pri" onclick="sgIr('fecho')">Fechar visita ›</button>`}</div>`;
 }
 const sgComp1 = () => sgc.competencias.some(c => c.id === sg.comp) ? sg.comp : sgc.competencias[0].id;
-function vSgcPergunta(v, ant, p) {
-  const r = sgcResp(v, p.id) || {}, ra = ant && sgcResp(ant, p.id), tem = r.nota != null || r.no;
+function vSgcPergunta(v, p) {
+  const r = sgcResp(v, p.id) || {}, tem = r.nota != null || r.no;
   const notas = (v.notas_rapidas || []).filter(n => n.pergunta_id === p.id && !(r.evidencia || '').includes(n.texto));
   const b = (val, txt, cls) => `<button class="${cls} ${(val === 'no' ? r.no : r.nota === val) ? 'on' : ''}" onclick="sgNota('${p.id}',${val === 'no' ? "'no'" : val})">${txt}</button>`;
   return `<div class="sg-q ${tem ? 'on' : ''}" id="q-${p.id.replace('.', '-')}">
     <div class="sg-row" style="align-items:flex-start"><span class="sg-id">${p.id}</span><b style="flex:1;font-size:15px;line-height:1.4">${esc(p.pergunta)}</b></div>
     ${p.como_verificar ? `<span class="mut sm-t">Como verificar: ${esc(p.como_verificar)}</span>` : ''}
-    <div class="sg-ant">${ant ? `<b>Visita ${ant.numero} · ${ra?.nota != null ? 'nota ' + ra.nota : 'não observada'}</b>${ra?.evidencia ? ' · ' + esc(ra.evidencia) : ''}` : '<b>Primeira visita</b>'}</div>
-    <div class="sg-nb">${b(0, '0', 'n0')}${b(1, '1', 'n1')}${b(2, '2', 'n2')}${b('no', 'n/o', 'nno')}</div>
-    ${r.nota != null ? `<span class="sm-t"><b>${r.nota} =</b> ${esc(p['descritor_' + r.nota] || '')}</span>` : ''}
-    ${r.nota != null && ra?.nota != null ? `<div>${sgcSetaChip(sgcSeta(ra.nota, r.nota), `${{ '▲': 'Melhorou', '▼': 'Piorou', '=': 'Igual' }[sgcSeta(ra.nota, r.nota)]} · ${ra.nota} → ${r.nota}`)}</div>` : ''}
+    <div class="sg-crit">${[0, 1, 2].map(n => `<div class="${r.nota === n ? 'on' : ''}" onclick="sgNota('${p.id}',${n})"><span class="sg-nt n${n}">${n}</span><span>${esc(p['descritor_' + n] || '')}</span></div>`).join('')}</div>
+    <div class="sg-nb">${b(0, '0', 'n0')}${b(1, '1', 'n1')}${b(2, '2', 'n2')}${b('no', 'N/A', 'nno')}</div>
     <textarea class="in" rows="2" placeholder="Evidência: o que viu hoje…" oninput="sgEvid('${p.id}',this.value)">${esc(r.evidencia || '')}</textarea>
     ${notas.map(n => `<button class="sg-sug" onclick="sgUsarNota('${p.id}','${n.id}')">+ Usar nota rápida (${n.polaridade || ''} ${esc(n.passo || '')}): ${esc(n.texto)}</button>`).join('')}</div>`;
 }
@@ -1567,13 +1580,13 @@ function vSgcFecho() {
   const v = sgcV(), g = sgcG(v.gestor_id), ant = sgcAnterior(v), r = sgcCalc(v), ra = ant && sgcCalc(ant);
   const setas = r.comp.map((c, i) => sgcSeta(ra?.comp[i].pct, c.pct)), cont = s => setas.filter(x => x === s).length;
   return `${sgcVoltar("sgIr('avaliar')", 'Perguntas')}<div class="sg-h"><small>Fechar visita ${v.numero}</small><h2>Resultado · ${esc(g.nome)}</h2></div>
-    <section class="card sg-res"><div><b>${sgcPct(r.pct)}</b> <span>${r.pts} de ${r.max} pontos · ${r.obs} de ${sgc.perguntas.length} perguntas observadas</span></div>
+    <section class="card sg-res"><div><b>${sgcPct(r.pct)}</b> <span>${r.pts} de ${r.max} pontos · ${r.hoje} perguntas vistas hoje${r.obs - r.hoje ? ` + ${r.obs - r.hoje} com a nota de visitas anteriores` : ''}</span></div>
       ${ant ? `<div class="sg-row" style="gap:6px;margin-top:8px;flex-wrap:wrap">${sgcSetaChip('▲', cont('▲') + ' melhoraram')}${sgcSetaChip('=', cont('=') + ' iguais')}${sgcSetaChip('▼', cont('▼') + ' pioraram')}</div>` : ''}</section>
-    <p class="mut sm-t">A % de cada competência é calculada pelas perguntas observadas. Confirme o porquê de cada uma.</p>
+    <p class="mut sm-t">Cada pergunta conta com a nota mais recente: a de hoje ou, se ficou N/A, a última de uma visita anterior. Confirme o porquê de cada competência.</p>
     ${r.comp.map((c, i) => { const comp = sgcComp(c.id), pq = sgcPorque(v, c.id) || sgcPorqueSugerido(v, c.id);
       return `<section class="card sg-fc"><div class="sg-row"><b style="flex:1">${c.id} · ${esc(comp.nome)}</b>${sgcNivelChip(c.nivel)}</div>
         <div class="sg-row" style="flex-wrap:wrap;gap:6px;margin:6px 0">${ant ? `<span class="sm-t">Visita ${ant.numero} ${sgcPct(ra.comp[i].pct)} → hoje <b>${sgcPct(c.pct)}</b></span>${sgcSetaChip(setas[i])}` : `<span class="sm-t">Hoje <b>${sgcPct(c.pct)}</b></span>`}
-          <span class="mut sm-t">${c.obs}/${c.total} perguntas</span>${c.pouca ? sgcPouca : ''}</div>
+          <span class="mut sm-t">${c.hoje} vistas hoje${c.herdadas ? ` · ${c.herdadas} de visitas anteriores` : ''} · ${c.obs}/${c.total} com nota</span>${c.pouca ? sgcPouca : ''}</div>
         <textarea class="in" rows="2" placeholder="Porquê desta nota…" oninput="sgPorque(${c.id},this.value)">${esc(pq)}</textarea></section>`; }).join('')}
     <section class="card"><div class="fld" style="margin:0"><label class="f">Comentário geral <span style="font-weight:400">(opcional)</span></label>
       <textarea class="in" rows="4" placeholder="Texto corrido sobre a visita…" oninput="sgComentario(this.value)">${esc(v.comentario_geral || '')}</textarea></div></section>
@@ -1594,36 +1607,44 @@ function sgcEvoluir(v) {
   const cand = r.comp.filter(c => c.obs >= min).length ? r.comp.filter(c => c.obs >= min) : r.comp.filter(c => c.obs > 0);
   return cand.sort((a, b) => a.pct - b.pct)[0] || null;
 }
+function sgcFbDados(v) {
+  const ant = sgcAnterior(v), r = sgcCalc(v), ra = ant && sgcCalc(ant);
+  const mud = ant ? r.comp.map((c, i) => [c, sgcSeta(ra.comp[i].pct, c.pct), ra.comp[i]]).filter(x => x[1] === '▲' || x[1] === '▼') : [];
+  const hoje = sgc.perguntas.map(p => ({ p, n: sgcResp(v, p.id)?.nota, a: sgcAntNota(v, p.id) })).filter(x => x.n != null);
+  return { ant, r, mud, subiu: hoje.filter(x => x.a && x.n > x.a.nota), desceu: hoje.filter(x => x.a && x.n < x.a.nota),
+           fortes: hoje.filter(x => x.n === 2), melhorar: hoje.filter(x => x.n < 2), ev: sgcEvoluir(v) };
+}
 function sgcTextoFeedback(v) {
-  const g = sgcG(v.gestor_id), ant = sgcAnterior(v), r = sgcCalc(v), ra = ant && sgcCalc(ant), ev = sgcEvoluir(v), L = [];
+  const g = sgcG(v.gestor_id), d = sgcFbDados(v), L = [];
   L.push(`Feedback · ${g.nome} · visita ${v.numero}${v.loja ? ' · ' + v.loja : ''}${v.data ? ' · ' + fmtDia(v.data) : ''}`);
-  L.push(`Resultado: ${sgcPct(r.pct)} (${r.pts} de ${r.max} pontos)`);
-  if (ant) {
-    const mud = r.comp.map((c, i) => [c, sgcSeta(ra.comp[i].pct, c.pct), ra.comp[i]]).filter(x => x[1] === '▲' || x[1] === '▼');
-    L.push('', `Desde a visita ${ant.numero}:`, ...(mud.length ? mud.map(([c, s, a]) => `${s} ${sgcComp(c.id).nome}: ${sgcPct(a.pct)} → ${sgcPct(c.pct)}`) : ['Sem mudanças nas competências comparáveis.']));
+  L.push(`Resultado: ${sgcPct(d.r.pct)} (${d.r.pts} de ${d.r.max} pontos)`);
+  if (d.ant) {
+    L.push('', `Desde a visita ${d.ant.numero}:`, ...(d.mud.length ? d.mud.map(([c, s, a]) => `${s} ${sgcComp(c.id).nome}: ${sgcPct(a.pct)} → ${sgcPct(c.pct)}`) : ['Sem mudanças nas competências.']));
+    if (d.subiu.length) L.push('Evoluiu:', ...d.subiu.map(x => `▲ ${x.p.id} ${x.p.pergunta} (${x.a.nota} → ${x.n})`));
+    if (d.desceu.length) L.push('Piorou:', ...d.desceu.map(x => `▼ ${x.p.id} ${x.p.pergunta} (${x.a.nota} → ${x.n})`));
   }
-  if (ev) {
-    const sem = sgcPergs(ev.id).filter(p => !sgcResp(v, p.id)?.evidencia).map(p => p.id);
-    L.push('', `Onde precisa evoluir: ${sgcComp(ev.id).nome} (${sgcPct(ev.pct)} · ${ev.nivel})`);
-    if (v.feedback?.como_evoluir) L.push(`Como evoluir: ${v.feedback.como_evoluir}`);
-    if (sem.length) L.push(`Ainda sem evidência: ${sem.join(' · ')}`);
-  }
-  const aa = ant?.acoes || [];
-  if (aa.length) L.push('', `Ações da visita ${ant.numero}:`, ...aa.map(a => `- ${a.descricao} (${a.estado})`));
-  if (v.acoes.length) L.push('', 'Novas ações:', ...v.acoes.map(a => `- ${a.descricao}${a.dono ? ' · ' + a.dono : ''}${a.prazo ? ' · até ' + fmtDia(a.prazo) : ''}`));
+  if (d.fortes.length) L.push('', 'Parabéns! Faz bem e está avançado em:', ...d.fortes.map(x => `- ${x.p.id} ${x.p.pergunta}`));
+  if (d.melhorar.length) L.push('', 'O que falta para chegar ao nível 2:', ...d.melhorar.map(x => `- ${x.p.id} ${x.p.pergunta} (hoje: ${x.n})\n  Para chegar a 2: ${x.p.descritor_2 || ''}`));
+  if (d.ev && v.feedback?.como_evoluir) L.push('', `Onde focar: ${sgcComp(d.ev.id).nome} (${sgcPct(d.ev.pct)} · ${d.ev.nivel})`, `Como evoluir: ${v.feedback.como_evoluir}`);
+  const aa = d.ant?.acoes || [];
+  if (aa.length && v.feedback?.incluir_acoes) L.push('', `Ações da visita ${d.ant.numero}:`, ...aa.map(a => `- ${a.descricao} (${a.estado})`));
+  if (v.acoes.length) L.push('', 'Novas ações:', ...v.acoes.filter(a => a.descricao.trim()).map(a => `- ${a.descricao}${a.dono ? ' · ' + a.dono : ''}${a.prazo ? ' · até ' + fmtDia(a.prazo) : ''}`));
   return L.join('\n');
 }
 function vSgcFeedback() {
-  const v = sgcV(), g = sgcG(v.gestor_id), ant = sgcAnterior(v), r = sgcCalc(v), ra = ant && sgcCalc(ant), ev = sgcEvoluir(v);
-  const mud = ant ? r.comp.map((c, i) => [c, sgcSeta(ra.comp[i].pct, c.pct), ra.comp[i]]).filter(x => x[1] === '▲' || x[1] === '▼') : [];
-  const sem = ev ? sgcPergs(ev.id).filter(p => !sgcResp(v, p.id)?.evidencia).map(p => p.id) : [];
+  const v = sgcV(), g = sgcG(v.gestor_id), d = sgcFbDados(v), { ant, mud, ev } = d;
+  const linhaP = (x, extra = '') => `<div class="sg-pl"><span class="sg-id">${x.p.id}</span>${sgcNotaBadge({ nota: x.n })}<span>${esc(x.p.pergunta)}${extra}</span></div>`;
   return `${sgcVoltar("sgIr('fecho')", 'Resultado')}<div class="sg-h"><small>Rascunho a partir das notas · revise</small><h2>Feedback para ${esc(g.nome)}</h2></div>
     ${ant ? `<section class="card"><h3 class="sec" style="margin-top:0">Desde a visita ${ant.numero}</h3>
-      ${mud.length ? mud.map(([c, s, a]) => `<div class="sg-row" style="margin:6px 0">${sgcSetaChip(s, ' ')}<span>${esc(sgcComp(c.id).nome)} ${sgcPct(a.pct)} → ${sgcPct(c.pct)}</span></div>`).join('') : '<p class="mut sm-t">Sem mudanças nas competências comparáveis.</p>'}</section>` : ''}
-    ${ev ? `<section class="card sg-evo"><h3 class="sec" style="margin-top:0">Onde precisa evoluir · ${esc(sgcComp(ev.id).nome)} (${ev.nivel})</h3>
-      <div class="fld"><label class="f">Como evoluir</label><textarea class="in" rows="2" placeholder="O que ele deve fazer de diferente…" oninput="sgFb('como_evoluir',this.value)">${esc(v.feedback?.como_evoluir || '')}</textarea></div>
-      ${sem.length ? `<span class="sm-t">Ainda sem evidência: ${sem.join(' · ')}</span>` : ''}</section>` : ''}
-    ${ant?.acoes?.length ? `<section class="card"><h3 class="sec" style="margin-top:0">Ações da visita ${ant.numero}</h3>${ant.acoes.map(vSgcAcaoEstado).join('')}</section>` : ''}
+      ${mud.length ? mud.map(([c, s, a]) => `<div class="sg-row" style="margin:6px 0">${sgcSetaChip(s, ' ')}<span>${esc(sgcComp(c.id).nome)} ${sgcPct(a.pct)} → ${sgcPct(c.pct)}</span></div>`).join('') : '<p class="mut sm-t">Sem mudanças nas competências.</p>'}
+      ${d.subiu.length ? `<h3 class="sec">Evoluiu</h3>${d.subiu.map(x => linhaP(x, ` <span class="mut">(${x.a.nota} → ${x.n})</span>`)).join('')}` : ''}
+      ${d.desceu.length ? `<h3 class="sec">Piorou</h3>${d.desceu.map(x => linhaP(x, ` <span class="mut">(${x.a.nota} → ${x.n})</span>`)).join('')}` : ''}</section>` : ''}
+    ${d.fortes.length ? `<section class="card"><h3 class="sec" style="margin-top:0">Pontos fortes · parabenizar</h3><p class="mut sm-t" style="margin:0 0 4px">Faz bem e está avançado nestes pontos.</p>${d.fortes.map(x => linhaP(x)).join('')}</section>` : ''}
+    ${d.melhorar.length ? `<section class="card sg-evo"><h3 class="sec" style="margin-top:0">O que falta para chegar ao 2</h3>${d.melhorar.map(x => linhaP(x, `<br><span class="sm-t"><b>Para chegar a 2:</b> ${esc(x.p.descritor_2 || '')}</span>`)).join('')}</section>` : ''}
+    ${ev ? `<section class="card"><h3 class="sec" style="margin-top:0">Onde focar · ${esc(sgcComp(ev.id).nome)} (${sgcPct(ev.pct)} · ${ev.nivel})</h3>
+      <div class="fld" style="margin:0"><label class="f">Como evoluir <span style="font-weight:400">(opcional)</span></label><textarea class="in" rows="2" placeholder="O que ele deve fazer de diferente…" oninput="sgFb('como_evoluir',this.value)">${esc(v.feedback?.como_evoluir || '')}</textarea></div></section>` : ''}
+    ${ant?.acoes?.length ? `<section class="card"><h3 class="sec" style="margin-top:0">Ações da visita ${ant.numero}</h3>${ant.acoes.map(vSgcAcaoEstado).join('')}
+      <label class="chk" style="margin-top:8px"><input type="checkbox" ${v.feedback?.incluir_acoes ? 'checked' : ''} onchange="sgFb('incluir_acoes',this.checked)"> Incluir estas ações no texto do feedback</label></section>` : ''}
     <section class="card"><h3 class="sec" style="margin-top:0">Novas ações · máximo 3</h3>
       ${v.acoes.map((a, i) => `<div class="sg-na"><div class="g2"><select class="in" onchange="sgAcao(${i},'competencia_id',this.value?+this.value:null)"><option value="">Competência…</option>
           ${sgc.competencias.map(c => `<option value="${c.id}" ${a.competencia_id === c.id ? 'selected' : ''}>${c.id} · ${esc(c.nome)}</option>`).join('')}</select>
@@ -1805,11 +1826,11 @@ function xResumoVisita(wb, v) {
     xCab(ws, 3 + i, 1, [k], 'FF2B4F99'); xTxt(ws.getCell(3 + i, 2), val, { font: { bold: i === 0, color: xCor(String(val).startsWith('[') ? 'FF0000FF' : 'FF000000') } }); });
   [['Limite Intermediário (≥)', cfg.li, '0%'], ['Limite Avançado (≥)', cfg.la, '0%'], ['Mín. perguntas p/ nível fiável', cfg.min, '0']].forEach(([k, val, f], i) => {
     xCab(ws, 3 + i, 5, [k], 'FF2B4F99'); xTxt(ws.getCell(3 + i, 6), val, { font: { color: xCor('FF0000FF') }, numFmt: f }); });
-  xCab(ws, 11, 1, ['Competência', 'Perguntas observadas', 'Pontos', 'Máximo', '%', 'Nível', 'Pouca evidência', 'Porquê', 'Evolução vs. visita anterior']);
-  r.comp.forEach((c, i) => { const row = 12 + i, [a, b] = L[c.id], rg = `'Registo da visita'!E${a}:E${b}`;
+  xCab(ws, 11, 1, ['Competência', 'Perguntas com nota', 'Pontos', 'Máximo', '%', 'Nível', 'Pouca evidência', 'Porquê', 'Evolução vs. visita anterior']);
+  r.comp.forEach((c, i) => { const row = 12 + i, [a, b] = L[c.id], rg = `'Registo da visita'!I${a}:I${b}`;
     xTxt(ws.getCell(row, 1), sgcCompNome(sgcComp(c.id)), { font: { bold: true, color: xCor('FF103273') }, fill: 'FFE6EDFB' });
     ws.getCell(row, 2).value = xF(`COUNT(${rg})`, c.obs); ws.getCell(row, 3).value = xF(`SUM(${rg})`, c.pts); ws.getCell(row, 4).value = xF(`2*B${row}`, c.max);
-    ws.getCell(row, 5).value = xF(`IF(B${row}=0,"n/o",C${row}/D${row})`, c.pct == null ? 'n/o' : c.pct); ws.getCell(row, 5).numFmt = '0%';
+    ws.getCell(row, 5).value = xF(`IF(B${row}=0,"N/A",C${row}/D${row})`, c.pct == null ? 'N/A' : c.pct); ws.getCell(row, 5).numFmt = '0%';
     ws.getCell(row, 6).value = xF(xNivelF(`E${row}`, `B${row}`), c.nivel); ws.getCell(row, 7).value = xF(`IF(AND(B${row}>0,B${row}<$F$5),"Sim","")`, c.pouca ? 'Sim' : '');
     xTxt(ws.getCell(row, 8), sgcPorque(v, c.id) || (c.obs ? '' : 'Não observada na visita.'), { font: { size: 9 } });
     const s = ra && sgcSeta(ra.comp[i].pct, c.pct);
@@ -1817,27 +1838,31 @@ function xResumoVisita(wb, v) {
     [2, 3, 4, 5, 6, 7].forEach(k => { ws.getCell(row, k).font = { ...XA }; ws.getCell(row, k).alignment = { vertical: 'top' }; }); });
   xCab(ws, 20, 1, ['Total da visita']);
   ['B', 'C', 'D'].forEach((k, i) => { ws.getCell(`${k}20`).value = xF(`SUM(${k}12:${k}19)`, [r.obs, r.pts, r.max][i]); });
-  ws.getCell('E20').value = xF('IF(D20=0,"n/o",C20/D20)', r.pct == null ? 'n/o' : r.pct); ws.getCell('E20').numFmt = '0%';
+  ws.getCell('E20').value = xF('IF(D20=0,"N/A",C20/D20)', r.pct == null ? 'N/A' : r.pct); ws.getCell('E20').numFmt = '0%';
   ['B20', 'C20', 'D20', 'E20'].forEach(k => { ws.getCell(k).font = { ...XA, bold: true, color: xCor('FFFFFFFF') }; xFill(ws.getCell(k), 'FF103273'); });
   xNivelRegras(ws, 'F12:F19');
   ws.addConditionalFormatting({ ref: 'G12:G19', rules: [{ type: 'expression', priority: 1, formulae: ['G12="Sim"'], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: xCor('FFFFF4D6') }, font: { color: xCor('FF7A5300'), bold: true } } }] });
   xLarg(ws, [34, 13, 14, 10, 24, 14, 12, 70, 18]);
 }
 function xRegistoVisita(wb, v) {
-  const g = sgcG(v.gestor_id), ant = sgcAnterior(v);
+  const g = sgcG(v.gestor_id);
   const ws = wb.addWorksheet('Registo da visita', { views: [{ state: 'frozen', xSplit: 3, ySplit: 3 }] });
-  xTitulo(ws, `REGISTO DA VISITA – ${g.nome.toUpperCase()} (${g.nivel}) · VISITA ${v.numero}`, `Nota em branco = pergunta não observada (não conta para a pontuação).${ant ? '' : ' Nota anterior em branco na 1.ª visita.'}`);
-  xCab(ws, 3, 1, ['Nº', 'Competência', 'Pergunta', 'Como verificar', 'Nota (0–2)', 'Evidência observada', 'Nota visita anterior', 'Evolução']);
+  xTitulo(ws, `REGISTO DA VISITA – ${g.nome.toUpperCase()} (${g.nivel}) · VISITA ${v.numero}`,
+    'Nota hoje em branco = N/A: conta a última nota anterior (colunas G e H). Sem nenhuma nota, a pergunta não conta para a pontuação.');
+  xCab(ws, 3, 1, ['Nº', 'Competência', 'Pergunta', 'Como verificar', 'Nota hoje (0–2)', 'Evidência observada', 'Última nota anterior', 'Da visita', 'Nota considerada', 'Evolução']);
   xRegisto(ws, 4, true);
-  sgc.perguntas.forEach((p, i) => { const row = 4 + i, rr = sgcResp(v, p.id), ra = ant && sgcResp(ant, p.id);
-    xNotaCelula(ws.getCell(row, 5), rr?.nota); xTxt(ws.getCell(row, 6), rr?.evidencia || null, { font: { size: 9 } }); xNotaCelula(ws.getCell(row, 7), ra?.nota);
-    const s = sgcSeta(ra?.nota, rr?.nota);
-    ws.getCell(row, 8).value = xF(`IF(AND(ISNUMBER(E${row}),ISNUMBER(G${row})),IF(E${row}>G${row},"▲ melhorou",IF(E${row}=G${row},"= igual","▼ piorou")),"—")`,
+  sgc.perguntas.forEach((p, i) => { const row = 4 + i, rr = sgcResp(v, p.id), a = sgcAntNota(v, p.id), e = sgcEf(v, p.id);
+    xNotaCelula(ws.getCell(row, 5), rr?.nota); xTxt(ws.getCell(row, 6), rr?.evidencia || null, { font: { size: 9 } });
+    xNotaCelula(ws.getCell(row, 7), a?.nota); xTxt(ws.getCell(row, 8), a ? `Visita ${a.de}` : null, { font: { size: 9, color: xCor('FF4B5568') } });
+    ws.getCell(row, 9).value = xF(`IF(ISNUMBER(E${row}),E${row},IF(ISNUMBER(G${row}),G${row},""))`, e ? e.nota : '');
+    ws.getCell(row, 9).font = { ...XA, bold: true }; ws.getCell(row, 9).alignment = { horizontal: 'center', vertical: 'top' };
+    const s = sgcSeta(a?.nota, rr?.nota);
+    ws.getCell(row, 10).value = xF(`IF(AND(ISNUMBER(E${row}),ISNUMBER(G${row})),IF(E${row}>G${row},"▲ melhorou",IF(E${row}=G${row},"= igual","▼ piorou")),"—")`,
       s ? { '▲': '▲ melhorou', '=': '= igual', '▼': '▼ piorou' }[s] : '—');
-    ws.getCell(row, 8).font = { ...XA, bold: true }; });
+    ws.getCell(row, 10).font = { ...XA, bold: true }; });
   const fim = 3 + sgc.perguntas.length;
-  xNotaRegras(ws, `E4:E${fim}`); xNotaRegras(ws, `G4:G${fim}`);
-  xLarg(ws, [6.7, 20.7, 46.7, 22, 10.7, 46.7, 11.7, 13]);
+  xNotaRegras(ws, `E4:E${fim}`); xNotaRegras(ws, `G4:G${fim}`); xNotaRegras(ws, `I4:I${fim}`);
+  xLarg(ws, [6.7, 20.7, 46.7, 22, 10.7, 46.7, 11.7, 10, 11.7, 13]);
 }
 function xComentarios(wb, v) {
   const g = sgcG(v.gestor_id), ws = wb.addWorksheet('Comentários');
@@ -1901,14 +1926,14 @@ function sgcExcelGestor(gid) {
     [['Gestor', g.nome], ['Nível', g.nivel], ['Visitas', vs.length]].forEach(([k, val], i) => { xCab(rs, 3 + i, 1, [k], 'FF2B4F99'); xTxt(rs.getCell(3 + i, 2), val); });
     [['Limite Intermediário (≥)', cfg.li, '0%'], ['Limite Avançado (≥)', cfg.la, '0%'], ['Mín. perguntas p/ nível fiável', cfg.min, '0']].forEach(([k, val, f], i) => {
       xCab(rs, 3 + i, 5, [k], 'FF2B4F99'); xTxt(rs.getCell(3 + i, 6), val, { font: { color: xCor('FF0000FF') }, numFmt: f }); });
-    const colReg = i => 4 + i * 2;  // coluna da Nota da visita i no Registo
+    const colReg = i => 4 + i * 3;  // coluna da Nota da visita i no Registo (Nota, Evidência, Considerada)
     const letra = n => { let s = ''; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; } return s; };
     xCab(rs, 10, 1, ['Competência', ...vs.flatMap(v => [`Visita ${v.numero} · %`, `Visita ${v.numero} · nível`])]);
     const calc = vs.map(sgcCalc);
     sgc.competencias.forEach((c, i) => { const row = 11 + i, [a, b] = L[c.id];
       xTxt(rs.getCell(row, 1), sgcCompNome(c), { font: { bold: true, color: xCor('FF103273') }, fill: 'FFE6EDFB' });
-      vs.forEach((v, k) => { const col = letra(colReg(k)), rg = `'Registo do gestor'!${col}${a}:${col}${b}`, x = calc[k].comp[i], pc = rs.getCell(row, 2 + k * 2), nc = rs.getCell(row, 3 + k * 2);
-        pc.value = xF(`IF(COUNT(${rg})=0,"n/o",SUM(${rg})/(2*COUNT(${rg})))`, x.pct == null ? 'n/o' : x.pct); pc.numFmt = '0%'; pc.font = { ...XA };
+      vs.forEach((v, k) => { const col = letra(colReg(k) + 2), rg = `'Registo do gestor'!${col}${a}:${col}${b}`, x = calc[k].comp[i], pc = rs.getCell(row, 2 + k * 2), nc = rs.getCell(row, 3 + k * 2);
+        pc.value = xF(`IF(COUNT(${rg})=0,"N/A",SUM(${rg})/(2*COUNT(${rg})))`, x.pct == null ? 'N/A' : x.pct); pc.numFmt = '0%'; pc.font = { ...XA };
         const pl = letra(2 + k * 2);
         nc.value = xF(`IF(COUNT(${rg})=0,"Não observado",IF(${pl}${row}<$F$3,"Básico",IF(${pl}${row}<$F$4,"Intermediário","Avançado")))`, x.nivel); nc.font = { ...XA }; }); });
     vs.forEach((v, k) => xNivelRegras(rs, `${letra(3 + k * 2)}11:${letra(3 + k * 2)}${10 + sgc.competencias.length}`));
@@ -1917,12 +1942,15 @@ function sgcExcelGestor(gid) {
     xTitulo(ws, `REGISTO DO GESTOR – ${g.nome.toUpperCase()} (${g.nivel})`, 'Nota em branco = pergunta não observada (não conta para a pontuação).');
     xCab(ws, 3, 1, ['Nº', 'Competência', 'Pergunta']); xCab(ws, 4, 1, ['', '', '']);
     [1, 2, 3].forEach(k => ws.mergeCells(3, k, 4, k));
-    vs.forEach((v, k) => { xCab(ws, 3, colReg(k), [`Visita ${v.numero}${v.data ? ' · ' + fmtDia(v.data) : ''}${v.loja ? ' · ' + v.loja : ''}`, '']); ws.mergeCells(3, colReg(k), 3, colReg(k) + 1);
-      xCab(ws, 4, colReg(k), ['Nota (0–2)', 'Evidência observada']); });
+    vs.forEach((v, k) => { xCab(ws, 3, colReg(k), [`Visita ${v.numero}${v.data ? ' · ' + fmtDia(v.data) : ''}${v.loja ? ' · ' + v.loja : ''}`, '', '']); ws.mergeCells(3, colReg(k), 3, colReg(k) + 2);
+      xCab(ws, 4, colReg(k), ['Nota (0–2)', 'Evidência observada', 'Nota considerada']); });
     xRegisto(ws, 5, false);
-    sgc.perguntas.forEach((p, i) => vs.forEach((v, k) => { const r = sgcResp(v, p.id); xNotaCelula(ws.getCell(5 + i, colReg(k)), r?.nota); xTxt(ws.getCell(5 + i, colReg(k) + 1), r?.evidencia || null, { font: { size: 9 } }); }));
-    vs.forEach((v, k) => xNotaRegras(ws, `${letra(colReg(k))}5:${letra(colReg(k))}${4 + sgc.perguntas.length}`));
-    xLarg(ws, [6.7, 20.7, 46.7, ...vs.flatMap(() => [9.7, 38.7])]);
+    sgc.perguntas.forEach((p, i) => vs.forEach((v, k) => { const r = sgcResp(v, p.id), e = sgcEf(v, p.id), row = 5 + i, n = letra(colReg(k)), c = ws.getCell(row, colReg(k) + 2);
+      xNotaCelula(ws.getCell(row, colReg(k)), r?.nota); xTxt(ws.getCell(row, colReg(k) + 1), r?.evidencia || null, { font: { size: 9 } });
+      c.value = xF(k ? `IF(ISNUMBER(${n}${row}),${n}${row},${letra(colReg(k - 1) + 2)}${row})` : `IF(ISNUMBER(${n}${row}),${n}${row},"")`, e ? e.nota : '');
+      c.font = { ...XA, bold: true }; c.alignment = { horizontal: 'center', vertical: 'top' }; }));
+    vs.forEach((v, k) => { xNotaRegras(ws, `${letra(colReg(k))}5:${letra(colReg(k))}${4 + sgc.perguntas.length}`); xNotaRegras(ws, `${letra(colReg(k) + 2)}5:${letra(colReg(k) + 2)}${4 + sgc.perguntas.length}`); });
+    xLarg(ws, [6.7, 20.7, 46.7, ...vs.flatMap(() => [9.7, 38.7, 10.7])]);
     if (ult) { xComentarios(wb, ult); xNotas(wb, ult); xObs(wb, ult); }
     xAcoes(wb, g, vs.flatMap(v => (v.acoes || []).map(a => ({ ...a, num: v.numero }))));
     xReferencial(wb); xPerguntas(wb);
@@ -1937,21 +1965,22 @@ function sgcExcelEquipe() {
     const rs = wb.addWorksheet('Resumo da equipe'), L = xLinhas(3);   // primeiro na ordem; preenchido depois do Registo
     const ws = wb.addWorksheet('Registo de Auditoria', { views: [{ state: 'frozen', xSplit: 3, ySplit: 2 }] });
     xCab(ws, 1, 1, ['Nº', 'Competência', 'Pergunta']); xCab(ws, 2, 1, ['', '', '']); [1, 2, 3].forEach(k => ws.mergeCells(1, k, 2, k));
-    gs.forEach((g, k) => { const c = 4 + k * 2, v = sgcUltima(g.id);
-      xCab(ws, 1, c, [`${g.nome} (${g.nivel}) · visita ${v.numero}`, '']); ws.mergeCells(1, c, 1, c + 1); xCab(ws, 2, c, ['Nota (0–2)', 'Evidência observada']); });
+    gs.forEach((g, k) => { const c = 4 + k * 3, v = sgcUltima(g.id);
+      xCab(ws, 1, c, [`${g.nome} (${g.nivel}) · visita ${v.numero}`, '', '']); ws.mergeCells(1, c, 1, c + 2); xCab(ws, 2, c, ['Nota (0–2)', 'Evidência observada', 'Nota considerada']); });
     xRegisto(ws, 3, false);
-    sgc.perguntas.forEach((p, i) => gs.forEach((g, k) => { const r = sgcResp(sgcUltima(g.id), p.id); xNotaCelula(ws.getCell(3 + i, 4 + k * 2), r?.nota); xTxt(ws.getCell(3 + i, 5 + k * 2), r?.evidencia || null, { font: { size: 9 } }); }));
-    gs.forEach((g, k) => xNotaRegras(ws, `${letra(4 + k * 2)}3:${letra(4 + k * 2)}${2 + sgc.perguntas.length}`));
-    xLarg(ws, [6.7, 20.7, 46.7, ...gs.flatMap(() => [9.7, 38.7])]);
+    sgc.perguntas.forEach((p, i) => gs.forEach((g, k) => { const v = sgcUltima(g.id), r = sgcResp(v, p.id), e = sgcEf(v, p.id);
+      xNotaCelula(ws.getCell(3 + i, 4 + k * 3), r?.nota); xTxt(ws.getCell(3 + i, 5 + k * 3), r?.evidencia || null, { font: { size: 9 } }); xNotaCelula(ws.getCell(3 + i, 6 + k * 3), e?.nota); }));
+    gs.forEach((g, k) => { xNotaRegras(ws, `${letra(4 + k * 3)}3:${letra(4 + k * 3)}${2 + sgc.perguntas.length}`); xNotaRegras(ws, `${letra(6 + k * 3)}3:${letra(6 + k * 3)}${2 + sgc.perguntas.length}`); });
+    xLarg(ws, [6.7, 20.7, 46.7, ...gs.flatMap(() => [9.7, 38.7, 10.7])]);
     xTitulo(rs, 'RESUMO DA EQUIPE – SHADOWING GESTORES DE CANAL', 'Última visita de cada gestor. % = pontos ÷ (2 × perguntas observadas).');
     [['Limite Intermediário (≥)', cfg.li, '0%'], ['Limite Avançado (≥)', cfg.la, '0%'], ['Mín. perguntas p/ nível fiável', cfg.min, '0']].forEach(([k, val, f], i) => {
       xCab(rs, 3 + i, 5, [k], 'FF2B4F99'); xTxt(rs.getCell(3 + i, 6), val, { font: { color: xCor('FF0000FF') }, numFmt: f }); });
     xCab(rs, 7, 1, ['Competência', ...gs.flatMap(g => [`${g.nome} · %`, `${g.nome} · nível`])]);
     sgc.competencias.forEach((c, i) => { const row = 8 + i, [a, b] = L[c.id];
       xTxt(rs.getCell(row, 1), sgcCompNome(c), { font: { bold: true, color: xCor('FF103273') }, fill: 'FFE6EDFB' });
-      gs.forEach((g, k) => { const col = letra(4 + k * 2), rg = `'Registo de Auditoria'!${col}${a}:${col}${b}`, x = sgcCalc(sgcUltima(g.id)).comp[i];
+      gs.forEach((g, k) => { const col = letra(6 + k * 3), rg = `'Registo de Auditoria'!${col}${a}:${col}${b}`, x = sgcCalc(sgcUltima(g.id)).comp[i];
         const pc = rs.getCell(row, 2 + k * 2), nc = rs.getCell(row, 3 + k * 2), pl = letra(2 + k * 2);
-        pc.value = xF(`IF(COUNT(${rg})=0,"n/o",SUM(${rg})/(2*COUNT(${rg})))`, x.pct == null ? 'n/o' : x.pct); pc.numFmt = '0%'; pc.font = { ...XA };
+        pc.value = xF(`IF(COUNT(${rg})=0,"N/A",SUM(${rg})/(2*COUNT(${rg})))`, x.pct == null ? 'N/A' : x.pct); pc.numFmt = '0%'; pc.font = { ...XA };
         nc.value = xF(`IF(COUNT(${rg})=0,"Não observado",IF(${pl}${row}<$F$3,"Básico",IF(${pl}${row}<$F$4,"Intermediário","Avançado")))`, x.nivel); nc.font = { ...XA }; }); });
     gs.forEach((g, k) => xNivelRegras(rs, `${letra(3 + k * 2)}8:${letra(3 + k * 2)}${7 + sgc.competencias.length}`));
     xLarg(rs, [34, ...gs.flatMap(() => [12, 16])]);
