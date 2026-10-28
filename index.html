@@ -237,7 +237,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '5.1';
+const VERSAO = '5.2';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -1280,7 +1280,7 @@ let sgc = null;        // { config, gestores, competencias, perguntas, visitas (
 let sg = { ecra: 'hoje', gestor: '', visita: '', comp: 1, loja: '', gerente: '', evo: '', evoComp: 1 };
 let sgObs = null, sgNotaF = null, sgcErro = '', sgcTimer = null, sgcSincronizando = false;
 const sgcGuardar = () => store.set(sgcKey(), sgc);
-const sgcPendentes = () => sgc ? Object.keys(sgc.pend || {}).length + Object.keys(sgc.pendAcoes || {}).length : 0;
+const sgcPendentes = () => sgc ? Object.keys(sgc.pend || {}).length + Object.keys(sgc.pendAcoes || {}).length + (sgc.desc || []).length : 0;
 const sgcG = id => sgc.gestores.find(g => g.id === id);
 const sgcV = (id = sg.visita) => sgc.visitas.find(v => v.id === id);
 const sgcVisitas = gid => sgc.visitas.filter(v => v.gestor_id === gid).sort((a, b) => a.numero - b.numero);
@@ -1330,6 +1330,8 @@ async function sgcSync() {
   sgcSincronizando = true;
   try {
     if (!sgc) sgc = { visitas: [], pend: {}, pendAcoes: {} };
+    sgc.desc = sgc.desc || [];
+    for (const id of [...sgc.desc]) { await rpc('sgc_visita_descartar', { p_token: sessao.token, p_id: id }); sgc.desc = sgc.desc.filter(x => x !== id); }
     for (const [id, ver] of Object.entries(sgc.pend)) {
       const v = sgcV(id);
       if (v) await rpc('sgc_visita_gravar', { p_token: sessao.token, p_v: v });
@@ -1348,8 +1350,9 @@ async function sgcSync() {
     });
     const ids = new Set(d.visitas.map(v => v.id));
     // o que ainda não foi enviado fica como está neste aparelho
+    d.visitas = d.visitas.filter(v => !sgc.desc.includes(v.id));
     const visitas = d.visitas.map(v => sgc.pend[v.id] ? locais.get(v.id) : v).concat([...locais.values()].filter(v => !ids.has(v.id) && sgc.pend[v.id]));
-    sgc = { config: d.config, gestores: d.gestores, competencias: d.competencias, perguntas: d.perguntas, visitas, pend: sgc.pend, pendAcoes: sgc.pendAcoes };
+    sgc = { config: d.config, gestores: d.gestores, competencias: d.competencias, perguntas: d.perguntas, visitas, pend: sgc.pend, pendAcoes: sgc.pendAcoes, desc: sgc.desc };
     sgcErro = ''; sgcGuardar();
     if (tela === 'lideranca' && !emEdicao()) render(); else atualizarSync();
   } catch (e) {
@@ -1462,11 +1465,22 @@ function sgIniciar() {
   sgc.visitas.push(v); sgcMudou(v); sg.visita = v.id; sg.comp = 1; sgIr('avaliar');
 }
 
+function sgDescartar() {
+  const v = sgcV(); if (!v || v.estado !== 'rascunho') return;
+  if (!confirm(`Descartar a visita ${v.numero} de ${sgcG(v.gestor_id).nome}? Tudo o que foi registrado nela é apagado.`)) return;
+  sgc.visitas = sgc.visitas.filter(x => x.id !== v.id); delete sgc.pend[v.id];
+  sgc.desc = [...(sgc.desc || []), v.id]; sgcMudou(null); toast('Visita descartada'); sgIr('hoje');
+}
+const sgcBtnDescartar = v => v.estado === 'rascunho' ? `<button class="btn ghost" style="color:#9E2A23" onclick="sgDescartar()">Descartar esta visita</button>` : '';
+// Abrir uma visita já feita para ver ou editar
+function sgEditar(id) { const v = sgcV(id); if (!v) return; sg.gestor = v.gestor_id; sg.visita = id; sg.comp = 1; tab = 'inicio'; sgIr('avaliar'); }
+
 // Cabeçalho comum dos ecrãs da visita
 function vSgcTopoVisita(v) {
   const g = sgcG(v.gestor_id), resp = v.respostas.filter(r => r.nota != null || r.no).length;
   return `<div class="sg-topo">${sgcAvatar(g, 36)}<div class="sg-nm"><b>Visita ${v.numero} · ${esc(g.nome)}</b><span>${esc(v.loja || '')} · ${resp} de ${sgc.perguntas.length} perguntas</span></div>
-    <button class="btn pri sm" style="width:auto" onclick="sgIr('fecho')">Fechar visita</button></div>`;
+    <button class="btn pri sm" style="width:auto" onclick="sgIr('fecho')">${v.estado === 'rascunho' ? 'Fechar visita' : 'Resultado'}</button></div>
+    ${v.estado !== 'rascunho' ? `<p class="sg-warn" style="display:block;margin:-4px 0 10px">A editar a visita ${v.numero}, já fechada. As alterações ficam gravadas.</p>` : ''}`;
 }
 function vSgcChipsComp(v, ativo) {
   const ant = sgcAnterior(v), aa = ant?.acoes || [], abertas = aa.filter(a => a.estado !== 'Fechada').length;
@@ -1483,6 +1497,7 @@ function vSgcAvaliar() {
   return `${sgcVoltar("sgIr('hoje')", 'Hoje')}${vSgcTopoVisita(v)}${vSgcChipsComp(v, c)}
     <h2 style="margin:6px 0 10px;font-size:17px">${c} · ${esc(comp.nome)}</h2>
     ${sgcPergs(c).map(p => vSgcPergunta(v, p)).join('')}
+    ${sgcBtnDescartar(v)}
     <div class="sg-bar"><button class="btn sec" onclick="sgIr('notas')">Nota rápida</button>
       ${prox ? `<button class="btn pri" onclick="sg.comp=${prox.id};sgIr('avaliar')">Próxima: ${SGC_CURTO[prox.id]} ›</button>` : `<button class="btn pri" onclick="sgIr('fecho')">Fechar visita ›</button>`}</div>`;
 }
@@ -1590,6 +1605,7 @@ function vSgcFecho() {
         <textarea class="in" rows="2" placeholder="Porquê desta nota…" oninput="sgPorque(${c.id},this.value)">${esc(pq)}</textarea></section>`; }).join('')}
     <section class="card"><div class="fld" style="margin:0"><label class="f">Comentário geral <span style="font-weight:400">(opcional)</span></label>
       <textarea class="in" rows="4" placeholder="Texto corrido sobre a visita…" oninput="sgComentario(this.value)">${esc(v.comentario_geral || '')}</textarea></div></section>
+    ${sgcBtnDescartar(v)}
     <div class="sg-bar"><button class="btn pri" onclick="sgFechar()">${v.estado === 'rascunho' ? 'Fechar e gerar feedback' : 'Ver feedback'} ›</button></div>`;
 }
 function sgPorque(c, t) { const v = sgcV(); let x = v.porques.find(p => p.competencia_id === c); if (!x) { x = { competencia_id: c, texto: '' }; v.porques.push(x); } x.texto = t; sgcMudou(v); }
@@ -1691,6 +1707,9 @@ function vSgcGestor() {
     <section class="card"><div class="sg-row">${sgcAvatar(g)}<div class="sg-nm"><b>${esc(g.nome)} · Gestor de Canal ${esc(g.nivel)}</b>
       <span>${r ? `Visita ${ult.numero}: ${sgcPct(r.pct)} (${r.pts} de ${r.max} pts) · ${r.obs} de ${sgc.perguntas.length} perguntas observadas` : 'Ainda sem visitas fechadas'}</span></div></div>
       ${vs.length ? `<button class="btn sec" style="margin-top:12px" onclick="sgcExcelGestor('${g.id}')">Exportar Excel do gestor</button>` : ''}</section>
+    ${sgcVisitas(g.id).length ? `<section class="card"><h2>Visitas</h2>${[...sgcVisitas(g.id)].reverse().map(v => { const rv = sgcCalc(v);
+      return `<button class="item" onclick="sgEditar('${v.id}')"><div class="l1"><span>Visita ${v.numero}${v.data ? ' · ' + fmtDia(v.data) : ''}</span><span>${{ rascunho: '<span class="pend">em curso</span>', fechada: 'feedback por dar', feedback_dado: 'feedback dado' }[v.estado]}</span></div>
+        <div class="l2">${esc(v.loja || 'Loja não indicada')}${v.gerente ? ' · ' + esc(v.gerente) : ''}</div><span class="chip">${sgcPct(rv.pct)} · ${rv.pts}/${rv.max} pts · abrir e editar</span></button>`; }).join('')}</section>` : ''}
     ${vs.length ? `<section class="card"><h2>Evolução por competência</h2><div class="sg-tab"><table><thead><tr><th>Competência</th>${vs.map(v => `<th>Visita ${v.numero}</th>`).join('')}<th class="sg-fut">Visita ${ult.numero + 1}</th></tr></thead><tbody>
       ${sgc.competencias.map((cp, i) => `<tr class="${cp.id === c ? 'on' : ''}" onclick="sg.evoComp=${cp.id};render()"><td>${esc(cp.nome)}</td>${calc.map(x => { const k = x.comp[i];
         return `<td><span class="sg-nv ${k.pct == null ? 'sg-no' : ''}" style="${sgcCor(k.nivel)}">${k.pct == null ? 'Não obs.' : sgcPct(k.pct) + ' · ' + SGC_ABREV[k.nivel]}</span>${k.pouca ? '<br><span class="sg-warn">pouca evid.</span>' : ''}</td>`; }).join('')}<td class="sg-fut">—</td></tr>`).join('')}
