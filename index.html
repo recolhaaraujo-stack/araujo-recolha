@@ -235,7 +235,7 @@ label.chk input{width:20px;height:20px}
 <input type="file" id="imp" accept=".csv,text/csv" multiple hidden>
 <script>
 'use strict';
-const VERSAO = '5.0';
+const VERSAO = '5.1';
 
 // ── Dados de referência (inputs_App Apontamento Falta.xlsx) ─────────────
 const LOJAS = [
@@ -1272,7 +1272,7 @@ const SGC_PASSOS = ['Abrir', 'Gemba', 'Analisar', 'Escalar', 'Fechar'];
 const SGC_PALETA = [['#D6F0F5', '#00596B'], ['#DCE3F3', '#103273'], ['#F0DDF4', '#6A1B7A'], ['#FDE8D7', '#8A3B00'], ['#DFF3E4', '#1E5E28'], ['#FFF4D6', '#7A5300']];   // cor do avatar pela ordem do gestor
 const SGC_NIVEL = { 'Básico': ['#C5D2EE', '#103273'], 'Intermediário': ['#7A9CE6', '#0B1F4D'], 'Avançado': ['#103273', '#FFFFFF'] };
 const SGC_ABREV = { 'Básico': 'Básico', 'Intermediário': 'Interm.', 'Avançado': 'Avanç.', 'Não observado': 'Não obs.' };
-const SGC_ECRAS_VISITA = ['resumo', 'avaliar', 'obs', 'notas', 'fecho', 'feedback'];
+const SGC_ECRAS_VISITA = ['resumo', 'avaliar', 'obs', 'notas', 'acoes', 'fecho', 'feedback'];
 const sgcKey = () => `rec_sgc_${sessao.username}`;
 let sgc = null;        // { config, gestores, competencias, perguntas, visitas (com respostas, porques, notas, observações, ações), pend: {visita: versão}, pendAcoes: {ação: estado} }
 let sg = { ecra: 'hoje', gestor: '', visita: '', comp: 1, loja: '', gerente: '', evo: '', evoComp: 1 };
@@ -1372,7 +1372,7 @@ function vSgc() {
   if (tab === 'registros') return vSgcGestor();
   if (tab === 'equipe') return vSgcEquipe();
   if (SGC_ECRAS_VISITA.includes(sg.ecra) && sg.ecra !== 'resumo' && !sgcV()) sg.ecra = 'hoje';
-  return { resumo: vSgcResumo, avaliar: vSgcAvaliar, obs: vSgcObs, notas: vSgcNotas, fecho: vSgcFecho, feedback: vSgcFeedback }[sg.ecra]?.() || vSgcHoje();
+  return { resumo: vSgcResumo, avaliar: vSgcAvaliar, obs: vSgcObs, notas: vSgcNotas, acoes: vSgcAcoesVisita, fecho: vSgcFecho, feedback: vSgcFeedback }[sg.ecra]?.() || vSgcHoje();
 }
 function sgIr(ecra) { sg.ecra = ecra; render(); scrollTo(0, 0); }
 
@@ -1413,7 +1413,7 @@ function vSgcResumo() {
     corpo = `<section class="card sg-res"><small>Visita ${ult.numero} · resultado</small><div><b>${sgcPct(r.pct)}</b> <span>${r.pts} de ${r.max} pontos possíveis</span></div>
         <span class="mut sm-t">${r.obs} de ${sgc.perguntas.length} perguntas observadas${ult.loja ? ' · ' + esc(ult.loja) : ''}${ult.data ? ' · ' + fmtDia(ult.data) : ''}</span>
         <div class="sg-leg" style="margin-top:8px">Nota por pergunta: ${sgcNotaBadge({ nota: 0 })} não demonstra ${sgcNotaBadge({ nota: 1 })} parcial ${sgcNotaBadge({ nota: 2 })} plena</div></section>
-      ${acoes.length ? `<section class="card"><h2>Ações da visita ${ult.numero}</h2>${acoes.map(vSgcAcaoEstado).join('')}</section>` : ''}
+      ${acoes.length ? `<section class="card"><h2>Ações da visita ${ult.numero}</h2><p class="mut sm-t" style="margin:0 0 6px">Combinadas no fim da visita ${ult.numero}. O estado também se atualiza durante a visita de hoje.</p>${acoes.map(vSgcAcaoEstado).join('')}</section>` : ''}
       ${r.comp.map(c => vSgcCompResumo(ult, c, c.id === 1)).join('')}`;
   }
   return `${sgcVoltar("sgIr('hoje')", 'Hoje')}<div class="sg-h"><small>Antes da visita ${n}</small><h2>${ult ? `Resumo da visita ${ult.numero} · ` : ''}${esc(g.nome)}</h2></div>
@@ -1453,7 +1453,8 @@ function vSgcTopoVisita(v) {
     <button class="btn pri sm" style="width:auto" onclick="sgIr('fecho')">Fechar visita</button></div>`;
 }
 function vSgcChipsComp(v, ativo) {
-  return `<div class="gch sg-wrap">${sgc.competencias.map(c => {
+  const ant = sgcAnterior(v), aa = ant?.acoes || [], abertas = aa.filter(a => a.estado !== 'Fechada').length;
+  return `<div class="gch sg-wrap">${aa.length ? `<button class="${ativo === 'acoes' ? 'on' : ''} sg-tr" onclick="sgIr('acoes')">Ações da visita ${ant.numero} · ${abertas ? abertas + ' em aberto' : 'fechadas'}</button>` : ''}${sgc.competencias.map(c => {
     const ps = sgcPergs(c.id), n = ps.filter(p => { const r = sgcResp(v, p.id); return r && (r.nota != null || r.no); }).length;
     return `<button class="${ativo === c.id ? 'on' : ''}" onclick="sg.comp=${c.id};sgIr('avaliar')">${SGC_CURTO[c.id]} ${n}/${ps.length}</button>`;
   }).join('')}<button class="${ativo === 'obs' ? 'on' : ''} sg-tr" onclick="sgIr('obs')">+ Outras observações${v.outras_observacoes.length ? ' · ' + v.outras_observacoes.length : ''}</button></div>`;
@@ -1496,6 +1497,15 @@ function sgEvid(pid, t) { const v = sgcV(); sgRespDe(v, pid).evidencia = t; sgcM
 function sgUsarNota(pid, nid) {
   const v = sgcV(), r = sgRespDe(v, pid), n = v.notas_rapidas.find(x => x.id === nid);
   r.evidencia = [r.evidencia, n.texto].filter(Boolean).join(' '); sgcMudou(v); render();
+}
+
+// Ações da visita anterior, acompanhadas durante a visita de hoje
+function vSgcAcoesVisita() {
+  const v = sgcV(), ant = sgcAnterior(v), aa = ant?.acoes || [];
+  return `${sgcVoltar("sgIr('avaliar')", 'Perguntas')}${vSgcTopoVisita(v)}${vSgcChipsComp(v, 'acoes')}
+    <section class="card"><h2>Ações da visita ${ant ? ant.numero : ''}</h2>
+      <p class="mut sm-t" style="margin:0 0 6px">Ações combinadas no fim da visita anterior. Durante a visita, verifique cada uma e atualize o estado.</p>
+      ${aa.length ? aa.map(vSgcAcaoEstado).join('') : '<p class="mut sm-t">Sem ações na visita anterior.</p>'}</section>`;
 }
 
 // 3b. Outras observações (não pontuam)
